@@ -294,7 +294,6 @@ docker-compose up -d
 
 ## 🙏 Благодарности
 
-- [Notion](https://notion.so) — за вдохновение
 - [shadcn/ui](https://ui.shadcn.com) — за красивые UI компоненты
 - [Radix UI](https://radix-ui.com) — за доступные примитивы
 - [Lucide](https://lucide.dev) — за иконки
