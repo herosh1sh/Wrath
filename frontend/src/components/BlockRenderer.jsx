@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle } from 'react';
+import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { BlockInput } from './BlockInput';
@@ -99,7 +99,5 @@ export const BlockRenderer = forwardRef(({ block, selected, readOnly, onUpdate, 
     </div>
   );
 });
-
-import { useRef } from 'react';
 
 BlockRenderer.displayName = 'BlockRenderer';

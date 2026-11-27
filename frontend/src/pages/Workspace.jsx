@@ -364,6 +364,6 @@ export default function Workspace() {
           <Button variant="ghost" onClick={() => setShowHistory(false)}>Закрыть</Button>
         </ModalFooter>
       </Modal>
-    </>
+    </div>
   );
 }
