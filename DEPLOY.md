@@ -241,9 +241,14 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-### 3. Получите SSL-сертификат от Let's Encrypt
+### 3. Настройте SSL (два варианта)
+
+#### Вариант А: Let's Encrypt (бесплатно, автообновление)
 
 ```bash
+# Установите Certbot
+sudo apt install -y certbot python3-certbot-nginx
+
 # Получите сертификат (замените email на свой)
 sudo certbot --nginx -d wrath.heroshish.ru --email your-email@example.com --agree-tos --non-interactive --redirect
 
@@ -253,6 +258,92 @@ sudo certbot renew --dry-run
 # Добавьте в cron для автообновления (уже делает certbot через systemd timer)
 systemctl status certbot.timer
 ```
+
+#### Вариант Б: Ваши сертификаты от reg.ru (или другого провайдера)
+
+Если у вас уже есть сертификаты (файлы `.crt`/`.pem` и `.key`), **не нужен Certbot**.
+
+**1. Подготовьте файлы сертификата**
+
+Обычно от reg.ru приходит архив с файлами:
+- `certificate.crt` — ваш сертификат
+- `ca_bundle.crt` — промежуточные сертификаты (chain)
+- `private.key` — приватный ключ
+
+**Объедините сертификат и chain в один файл (fullchain):**
+
+```bash
+# На сервере создайте директорию для SSL
+sudo mkdir -p /etc/nginx/ssl/wrath.heroshish.ru
+
+# Загрузите ваши файлы (через scp, sftp или скопируйте содержимое)
+# Например, если файлы лежат локально в ./ssl/:
+scp ./ssl/certificate.crt ./ssl/ca_bundle.crt ./ssl/private.key user@your-server:/tmp/
+
+# На сервере — объедините в fullchain.pem (порядок важен: сначала ваш сертификат, потом chain)
+sudo cat /tmp/certificate.crt /tmp/ca_bundle.crt > /etc/nginx/ssl/wrath.heroshish.ru/fullchain.pem
+sudo cp /tmp/private.key /etc/nginx/ssl/wrath.heroshish.ru/privkey.pem
+
+# Права (только root читает ключ)
+sudo chmod 644 /etc/nginx/ssl/wrath.heroshish.ru/fullchain.pem
+sudo chmod 600 /etc/nginx/ssl/wrath.heroshish.ru/privkey.pem
+sudo chown root:root /etc/nginx/ssl/wrath.heroshish.ru/*
+```
+
+**2. Обновите Nginx конфиг** — укажите пути к вашим файлам:
+
+В `/etc/nginx/sites-available/wrath.heroshish.ru` замените строки SSL на:
+
+```nginx
+# HTTPS
+server {
+    listen 443 ssl http2;
+    server_name wrath.heroshish.ru;
+
+    # ВАШИ сертификаты от reg.ru
+    ssl_certificate /etc/nginx/ssl/wrath.heroshish.ru/fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/wrath.heroshish.ru/privkey.pem;
+    
+    # ... остальной конфиг без изменений
+}
+```
+
+**3. Перезагрузите Nginx**
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**4. Настройте автообновление (важно!)**
+
+Сертификаты от reg.ru обычно выдаются на **1 год**. Нужно продлевать вручную:
+
+```bash
+# Создайте скрипт напоминания (запускать через cron раз в месяц)
+sudo tee /usr/local/bin/ssl-check-wrath.sh > /dev/null <<'EOF'
+#!/bin/bash
+# Проверяет срок действия сертификата за 30 дней
+CERT="/etc/nginx/ssl/wrath.heroshish.ru/fullchain.pem"
+DAYS_LEFT=$(( ($(date -d "$(openssl x509 -enddate -noout -in "$CERT" | cut -d= -f2)" +%s) - $(date +%s)) / 86400 ))
+
+if [ "$DAYS_LEFT" -lt 30 ]; then
+    echo "⚠️ SSL сертификат wrath.heroshish.ru истекает через $DAYS_LEFT дней!"
+    # Можно добавить отправку email/телеграм:
+    # curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" -d "chat_id=<CHAT_ID>&text=SSL%20wrath.heroshish.ru%20expires%20in%20$DAYS_LEFT%20days"
+fi
+EOF
+
+sudo chmod +x /usr/local/bin/ssl-check-wrath.sh
+
+# Добавьте в cron (проверка 1-го числа каждого месяца)
+(sudo crontab -l 2>/dev/null; echo "0 9 1 * * /usr/local/bin/ssl-check-wrath.sh") | sudo crontab -
+```
+
+**Когда сертификат истечёт:**
+1. Купите/продлите сертификат на reg.ru
+2. Скачайте новые файлы
+3. Повторите шаг 1 (замените файлы в `/etc/nginx/ssl/...`)
+4. `sudo systemctl reload nginx`
 
 ### 4. Настройте Firewall
 
