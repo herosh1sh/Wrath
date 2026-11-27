@@ -45,7 +45,7 @@
 
 1. **Клонируйте репозиторий**
 ```bash
-git clone https://github.com/yourusername/wrath.git
+git clone https://github.com/herosh1sh/Wrath.git
 cd wrath
 ```
 
