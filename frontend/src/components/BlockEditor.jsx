@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { cn } from '../lib/utils';
 import { BlockRenderer } from './BlockRenderer';
 import { SlashMenu } from './SlashMenu';
@@ -21,7 +21,7 @@ export function BlockEditor({
   const [focusedBlockId, setFocusedBlockId] = useState(null);
   const editorRef = useRef(null);
 
-  const handleDragEnd = (result: DropResult) => {
+  const handleDragEnd = (result) => {
     if (!result.destination) return;
     if (result.destination.index === result.source.index && result.destination.droppableId === result.source.droppableId) return;
 
