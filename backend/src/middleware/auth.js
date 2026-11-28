@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 import { getDatabase } from '../db/init.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
@@ -144,7 +145,7 @@ function hashToken(token) {
 export function createSession(userId, token) {
   const db = getDatabase();
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
-  const sessionId = crypto.randomUUID();
+  const sessionId = randomUUID();
 
   db.prepare(`
     INSERT INTO sessions (id, user_id, token_hash, expires_at)

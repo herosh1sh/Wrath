@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, CheckCircle, AlertCircle, AlertTriangle, Info } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -66,8 +66,6 @@ function Toast({ id, type, title, message, onClose, duration = 5000 }) {
     </div>
   );
 }
-
-import { useState } from 'react';
 
 function ToasterProvider({ children }) {
   const [toasts, setToasts] = useState([]);

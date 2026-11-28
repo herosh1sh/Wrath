@@ -6,7 +6,7 @@
 
 set -e
 
-PROJECT_DIR="/opt/wrath"
+PROJECT_DIR="~/wrath"
 LOG_FILE="/var/log/wrath-auto-update.log"
 COMPOSE_FILE="docker-compose.yml"
 
