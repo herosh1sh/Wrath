@@ -1,351 +1,238 @@
-import { useState, useRef, useEffect, useCallback, Fragment } from 'react';
-import { v4 as uuidv4 } from 'uuid';
-import { GripVertical, Plus, Trash2, MoreVertical, Type, Code, Quote, List, ListOrdered, CheckSquare, Heading1, Heading2, Heading3, Image, Link as LinkIcon, Table, Divider, X } from 'lucide-react';
-import { blocksApi } from '../lib/api';
-import { SlashMenu } from './SlashMenu';
-import { InlineToolbar } from './InlineToolbar';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import { cn } from '../lib/utils';
 import { BlockRenderer } from './BlockRenderer';
-import { BlockInput } from './BlockInput';
-import { useSocket } from '../contexts/SocketContext';
+import { SlashMenu } from './SlashMenu';
+import { BLOCK_TYPES, getBlockTypeIcon } from '../lib/utils';
+import { Plus, GripVertical, Trash2, Copy, MoreHorizontal } from 'lucide-react';
+import { Tooltip } from './ui/Tooltip';
+import { Dropdown } from './ui/Dropdown';
 
-const BLOCK_TYPES = [
-  { type: 'paragraph', label: 'Текст', icon: Type, shortcut: '' },
-  { type: 'heading1', label: 'Заголовок 1', icon: Heading1, shortcut: '# ' },
-  { type: 'heading2', label: 'Заголовок 2', icon: Heading2, shortcut: '## ' },
-  { type: 'heading3', label: 'Заголовок 3', icon: Heading3, shortcut: '### ' },
-  { type: 'bulletedList', label: 'Маркированный список', icon: List, shortcut: '- ' },
-  { type: 'numberedList', label: 'Нумерованный список', icon: ListOrdered, shortcut: '1. ' },
-  { type: 'todo', label: 'Список задач', icon: CheckSquare, shortcut: '[] ' },
-  { type: 'quote', label: 'Цитата', icon: Quote, shortcut: '> ' },
-  { type: 'code', label: 'Блок кода', icon: Code, shortcut: '```' },
-  { type: 'divider', label: 'Разделитель', icon: Divider, shortcut: '---' },
-  { type: 'image', label: 'Изображение', icon: Image, shortcut: '' },
-  { type: 'bookmark', label: 'Закладка', icon: LinkIcon, shortcut: '' },
-  { type: 'table', label: 'Таблица', icon: Table, shortcut: '' },
-];
-
-export function BlockEditor({ pageId, initialContent = [], onContentChange, readOnly = false }) {
-  const { on } = useSocket();
-  const [blocks, setBlocks] = useState(initialContent);
-  const [selectedBlockId, setSelectedBlockId] = useState(null);
-  const [draggingId, setDraggingId] = useState(null);
+export function BlockEditor({
+  blocks,
+  onChange,
+  pageId,
+  readOnly = false,
+  blockRefs
+}) {
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashMenuPosition, setSlashMenuPosition] = useState({ x: 0, y: 0 });
-  const [inlineToolbar, setInlineToolbar] = useState(null);
+  const [slashMenuQuery, setSlashMenuQuery] = useState('');
+  const [focusedBlockId, setFocusedBlockId] = useState(null);
   const editorRef = useRef(null);
-  const blockRefs = useRef({});
 
-  // Initialize blocks
-  useEffect(() => {
-    setBlocks(initialContent.map((block, index) => ({
+  const handleDragEnd = (result: DropResult) => {
+    if (!result.destination) return;
+    if (result.destination.index === result.source.index && result.destination.droppableId === result.source.droppableId) return;
+
+    const newBlocks = Array.from(blocks);
+    const [removed] = newBlocks.splice(result.source.index, 1);
+    newBlocks.splice(result.destination.index, 0, removed);
+
+    // Update positions
+    newBlocks.forEach((block, index) => {
+      block.position = index;
+    });
+
+    onChange(newBlocks);
+  };
+
+  const addBlock = (type, afterIndex = -1) => {
+    const newBlock = {
+      id: crypto.randomUUID(),
+      type,
+      content: getDefaultContent(type),
+      position: afterIndex + 1
+    };
+
+    const newBlocks = Array.from(blocks);
+    newBlocks.splice(afterIndex + 1, 0, newBlock);
+    newBlocks.forEach((block, index) => block.position = index);
+    onChange(newBlocks);
+
+    // Focus the new block
+    setTimeout(() => {
+      const element = document.querySelector(`[data-block-id="${newBlock.id}"]`);
+      element?.focus();
+    }, 0);
+  };
+
+  const deleteBlock = (blockId) => {
+    const newBlocks = blocks.filter(b => b.id !== blockId);
+    newBlocks.forEach((block, index) => block.position = index);
+    onChange(newBlocks);
+  };
+
+  const duplicateBlock = (blockId) => {
+    const index = blocks.findIndex(b => b.id === blockId);
+    if (index === -1) return;
+
+    const block = blocks[index];
+    const newBlock = {
       ...block,
-      id: block.id || uuidv4(),
-      position: block.position ?? index,
-    })));
-  }, [initialContent]);
-
-  // Socket listeners for real-time updates
-  useEffect(() => {
-    const unsubBlockCreated = on('block:created', (block) => {
-      setBlocks(prev => [...prev, block].sort((a, b) => a.position - b.position));
-    });
-
-    const unsubBlockUpdated = on('block:updated', (block) => {
-      setBlocks(prev => prev.map(b => b.id === block.id ? block : b).sort((a, b) => a.position - b.position));
-    });
-
-    const unsubBlockDeleted = on('block:deleted', ({ id }) => {
-      setBlocks(prev => prev.filter(b => b.id !== id));
-    });
-
-    const unsubBlocksReordered = on('blocks:reordered', (newBlocks) => {
-      setBlocks(newBlocks);
-    });
-
-    return () => {
-      unsubBlockCreated();
-      unsubBlockUpdated();
-      unsubBlockDeleted();
-      unsubBlocksReordered();
+      id: crypto.randomUUID(),
+      position: index + 1
     };
-  }, [on]);
 
-  // Notify parent of changes
-  useEffect(() => {
-    if (onContentChange) {
-      onContentChange(blocks);
-    }
-  }, [blocks, onContentChange]);
+    const newBlocks = Array.from(blocks);
+    newBlocks.splice(index + 1, 0, newBlock);
+    newBlocks.forEach((b, i) => b.position = i);
+    onChange(newBlocks);
+  };
 
-  const handleBlockUpdate = useCallback((id, updates) => {
-    setBlocks(prev => prev.map(block =>
-      block.id === id ? { ...block, ...updates } : block
-    ));
-  }, []);
-
-  const handleBlockDelete = useCallback(async (id) => {
-    const block = blocks.find(b => b.id === id);
-    if (!block) return;
-
-    // Optimistic delete
-    setBlocks(prev => prev.filter(b => b.id !== id));
-
-    try {
-      await blocksApi.delete(id);
-    } catch (err) {
-      console.error('Failed to delete block:', err);
-      // Revert on error
-      setBlocks(prev => [...prev, block].sort((a, b) => a.position - b.position));
-    }
-  }, [blocks]);
-
-  const handleBlockMove = useCallback((id, newPosition, newParentId = null) => {
-    setBlocks(prev => {
-      const blockIndex = prev.findIndex(b => b.id === id);
-      if (blockIndex === -1) return prev;
-
-      const block = prev[blockIndex];
-      const newBlocks = [...prev];
-      newBlocks.splice(blockIndex, 1);
-      newBlocks.splice(newPosition, 0, { ...block, position: newPosition, parentBlockId: newParentId });
-
-      // Recalculate positions
-      return newBlocks.map((b, i) => ({ ...b, position: i }));
-    });
-  }, []);
-
-  const handleDragStart = useCallback((e, id) => {
-    if (readOnly) return;
-    setDraggingId(id);
-    e.dataTransfer.effectAllowed = 'move';
-    e.target.classList.add('block-selected');
-  }, [readOnly]);
-
-  const handleDragOver = useCallback((e, id) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  }, []);
-
-  const handleDrop = useCallback((e, targetId) => {
-    e.preventDefault();
-    if (!draggingId || draggingId === targetId) return;
-
-    const blocksArray = [...blocks];
-    const dragIndex = blocksArray.findIndex(b => b.id === draggingId);
-    const targetIndex = blocksArray.findIndex(b => b.id === targetId);
-
-    if (dragIndex === -1 || targetIndex === -1) return;
-
-    const [draggedBlock] = blocksArray.splice(dragIndex, 1);
-    blocksArray.splice(targetIndex, 0, draggedBlock);
-
-    setBlocks(blocksArray.map((b, i) => ({ ...b, position: i })));
-    setDraggingId(null);
-  }, [blocks, draggingId]);
-
-  const handleDragEnd = useCallback(() => {
-    setDraggingId(null);
-  }, []);
-
-  const handleKeyDown = useCallback((e, blockId, index) => {
-    const block = blocks.find(b => b.id === blockId);
-    if (!block) return;
-
-    // Handle slash command
-    if (e.key === '/' && !slashMenuOpen) {
+  const handleKeyDown = (e, blockId, index) => {
+    if (e.key === '/' && e.target.textContent === '') {
+      e.preventDefault();
       const selection = window.getSelection();
-      if (selection.anchorOffset === 0 && selection.focusOffset === 0) {
-        e.preventDefault();
-        const blockRef = blockRefs.current[blockId];
-        if (blockRef) {
-          const rect = blockRef.getBoundingClientRect();
-          const editorRect = editorRef.current?.getBoundingClientRect();
-          if (editorRect) {
-            setSlashMenuPosition({
-              x: rect.left - editorRect.left,
-              y: rect.bottom - editorRect.top + 4,
-            });
-            setSlashMenuOpen(true);
-          }
-        }
+      if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        setSlashMenuPosition({ x: rect.left, y: rect.bottom + window.scrollY });
+        setSlashMenuQuery('');
+        setSlashMenuOpen(true);
       }
     }
 
-    // Handle markdown shortcuts
     if (e.key === 'Enter' && !e.shiftKey) {
-      const shortcut = BLOCK_TYPES.find(t => t.shortcut && block.content?.text?.startsWith(t.shortcut));
-      if (shortcut) {
+      const block = blocks.find(b => b.id === blockId);
+      if (block && block.type === 'paragraph' && block.content.text === '') {
         e.preventDefault();
-        const newBlock = {
-          id: uuidv4(),
-          type: shortcut.type,
-          content: { text: '' },
-          position: index + 1,
-        };
-        setBlocks(prev => {
-          const newBlocks = [...prev];
-          newBlocks.splice(index + 1, 0, newBlock);
-          return newBlocks.map((b, i) => ({ ...b, position: i }));
-        });
-        setSelectedBlockId(newBlock.id);
+        addBlock('paragraph', index);
       }
     }
 
-    // Handle backspace at start of block to merge with previous
-    if (e.key === 'Backspace') {
-      const selection = window.getSelection();
-      if (selection.anchorOffset === 0 && selection.focusOffset === 0 && index > 0) {
-        const prevBlock = blocks[index - 1];
-        if (prevBlock.type === block.type && prevBlock.type !== 'code') {
-          e.preventDefault();
-          handleBlockUpdate(prevBlock.id, {
-            content: { ...prevBlock.content, text: prevBlock.content.text + block.content.text },
-          });
-          handleBlockDelete(blockId);
-        }
+    if (e.key === 'Backspace' && e.target.textContent === '') {
+      const block = blocks.find(b => b.id === blockId);
+      if (block && block.type === 'paragraph' && blocks.length > 1) {
+        e.preventDefault();
+        deleteBlock(blockId);
       }
     }
-  }, [blocks, slashMenuOpen, handleBlockUpdate, handleBlockDelete]);
+  };
 
-  const handleSlashMenuSelect = useCallback((blockType) => {
-    const block = blocks.find(b => b.id === selectedBlockId);
-    if (!block) return;
-
-    const blockIndex = blocks.findIndex(b => b.id === selectedBlockId);
-    const newBlock = {
-      id: uuidv4(),
-      type: blockType.type,
-      content: blockType.defaultContent || { text: '' },
-      position: blockIndex + 1,
-    };
-
-    setBlocks(prev => {
-      const newBlocks = [...prev];
-      newBlocks.splice(blockIndex + 1, 0, newBlock);
-      return newBlocks.map((b, i) => ({ ...b, position: i }));
-    });
-
-    setSlashMenuOpen(false);
-    setSelectedBlockId(newBlock.id);
-  }, [blocks, selectedBlockId]);
-
-  const handleAddBlock = useCallback((afterId) => {
-    const index = blocks.findIndex(b => b.id === afterId);
-    const newBlock = {
-      id: uuidv4(),
-      type: 'paragraph',
-      content: { text: '' },
-      position: index + 1,
-    };
-
-    setBlocks(prev => {
-      const newBlocks = [...prev];
-      newBlocks.splice(index + 1, 0, newBlock);
-      return newBlocks.map((b, i) => ({ ...b, position: i }));
-    });
-
-    setSelectedBlockId(newBlock.id);
-  }, [blocks]);
-
-  const renderBlock = useCallback((block, index) => {
-    const isSelected = selectedBlockId === block.id;
-    const isDragging = draggingId === block.id;
-
-    return (
-      <Fragment key={block.id}>
-        <div
-          ref={(el) => { blockRefs.current[block.id] = el; }}
-          className={`block ${isSelected ? 'block-selected' : ''} ${isDragging ? 'opacity-50' : ''}`}
-          draggable={!readOnly}
-          onDragStart={(e) => handleDragStart(e, block.id)}
-          onDragOver={(e) => handleDragOver(e, block.id)}
-          onDrop={(e) => handleDrop(e, block.id)}
-          onDragEnd={handleDragEnd}
-          onClick={() => setSelectedBlockId(block.id)}
-        >
-          {!readOnly && (
-            <button
-              className="block-drag-handle absolute left-0 top-1/2 -translate-y-1/2 -ml-8 flex h-6 w-6 items-center justify-center text-foreground-muted hover:text-foreground transition-colors"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-              aria-label="Перетащите для изменения порядка"
-            >
-              <GripVertical className="h-5 w-5" />
-            </button>
-          )}
-
-          <BlockRenderer
-            block={block}
-            selected={isSelected}
-            readOnly={readOnly}
-            onUpdate={handleBlockUpdate}
-            onDelete={handleBlockDelete}
-            onAddAfter={handleAddBlock}
-            onKeyDown={(e) => handleKeyDown(e, block.id, index)}
-            ref={blockRefs.current[block.id]}
-          />
-
-          {!readOnly && (
-            <button
-              className="absolute right-0 top-1/2 -translate-y-1/2 -mr-8 flex h-6 w-6 items-center justify-center text-foreground-muted hover:text-foreground transition-colors opacity-0 group-hover:opacity-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelectedBlockId(block.id);
-              }}
-              aria-label="Параметры блока"
-            >
-              <MoreVertical className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-
-        {/* Add block button between blocks */}
-        {!readOnly && index < blocks.length - 1 && (
-          <button
-            onClick={() => handleAddBlock(block.id)}
-            className="flex items-center justify-center py-2 text-foreground-muted hover:text-foreground transition-colors"
-            aria-label="Добавить блок"
-          >
-            <Plus className="h-5 w-5 opacity-50 hover:opacity-100" />
-          </button>
-        )}
-      </Fragment>
-    );
-  }, [blocks, selectedBlockId, draggingId, readOnly, handleDragStart, handleDragOver, handleDrop, handleDragEnd, handleKeyDown, handleBlockUpdate, handleBlockDelete, handleAddBlock]);
+  const filteredBlockTypes = BLOCK_TYPES.filter(bt =>
+    bt.label.toLowerCase().includes(slashMenuQuery.toLowerCase())
+  );
 
   return (
-    <div
-      ref={editorRef}
-      className="relative max-w-3xl mx-auto"
-      role="textbox"
-      aria-multiline="true"
-    >
-      {blocks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Type className="h-12 w-12 text-foreground-muted/50 mb-4" />
-          <p className="text-foreground-muted">Начните вводить текст или нажмите <kbd className="px-1.5 py-0.5 text-xs font-mono bg-muted rounded-sm">/</kbd> для команд</p>
-        </div>
-      ) : (
-        blocks.map((block, index) => renderBlock(block, index))
-      )}
+    <DragDropContext onDragEnd={handleDragEnd}>
+      <Droppable droppableId="blocks">
+        {(provided, snapshot) => (
+          <div
+            ref={(el) => {
+              editorRef.current = el;
+              provided.innerRef(el);
+            }}
+            {...provided.droppableProps}
+            className={cn('flex flex-col gap-2', snapshot.isDraggingOver && 'bg-primary-light/20')}
+            data-editor="true"
+          >
+            {blocks.map((block, index) => (
+              <Draggable key={block.id} draggableId={block.id} index={index}>
+                {(provided, snapshot) => (
+                  <div
+                    ref={provided.innerRef}
+                    {...provided.draggableProps}
+                    {...provided.dragHandleProps}
+                    className={cn('relative', snapshot.isDragging && 'block-dragging')}
+                  >
+                    {/* Drag handle */}
+                    {!readOnly && (
+                      <Tooltip content="Drag to reorder" position="left">
+                        <div
+                          {...provided.dragHandleProps}
+                          className="block-handle"
+                          aria-label="Drag to reorder"
+                        >
+                          <GripVertical className="w-4 h-4" />
+                        </div>
+                      </Tooltip>
+                    )}
 
-      {/* Slash menu */}
-      <SlashMenu
-        isOpen={slashMenuOpen}
-        position={slashMenuPosition}
-        onClose={() => setSlashMenuOpen(false)}
-        onSelect={handleSlashMenuSelect}
-        blockTypes={BLOCK_TYPES}
-      />
+                    {/* Block renderer */}
+                    <BlockRenderer
+                      block={block}
+                      index={index}
+                      readOnly={readOnly}
+                      onChange={onChange}
+                      onFocus={() => setFocusedBlockId(block.id)}
+                      onBlur={() => setFocusedBlockId(null)}
+                      onKeyDown={(e) => handleKeyDown(e, block.id, index)}
+                      showSlashMenu={slashMenuOpen && focusedBlockId === block.id}
+                      onSlashMenuChange={(open, query, pos) => {
+                        if (open !== undefined) setSlashMenuOpen(open);
+                        if (query !== undefined) setSlashMenuQuery(query);
+                        if (pos !== undefined) setSlashMenuPosition(pos);
+                      }}
+                      ref={(el) => { if (el) blockRefs.current[block.id] = el; }}
+                    />
 
-      {/* Inline toolbar */}
-      {inlineToolbar && (
-        <InlineToolbar
-          position={inlineToolbar.position}
-          selection={inlineToolbar.selection}
-          onClose={() => setInlineToolbar(null)}
-        />
-      )}
-    </div>
+                    {/* Block menu */}
+                    {!readOnly && (
+                      <Tooltip content="Block options" position="right">
+                        <Dropdown
+                          trigger={
+                            <button className="p-1 rounded hover:bg-background-hover text-foreground-tertiary opacity-0 group-hover:opacity-100 transition-opacity" aria-label="Block options">
+                              <MoreHorizontal className="w-4 h-4" />
+                            </button>
+                          }
+                          items={[
+                            { label: 'Duplicate', icon: <Copy className="w-4 h-4" />, onClick: () => duplicateBlock(block.id), shortcut: '' },
+                            { label: 'Delete', icon: <Trash2 className="w-4 h-4" />, onClick: () => deleteBlock(block.id), shortcut: '', className: 'text-error' }
+                          ]}
+                        />
+                      </Tooltip>
+                    )}
+
+                    {/* Add block button between blocks */}
+                    {!readOnly && index === blocks.length - 1 && (
+                      <button
+                        onClick={() => addBlock('paragraph', index)}
+                        className="w-full flex items-center justify-center gap-2 py-3 text-foreground-tertiary hover:text-primary hover:bg-background-hover rounded-lg transition-colors border border-dashed border-border-light"
+                        type="button"
+                      >
+                        <Plus className="w-5 h-5" />
+                        <span className="text-sm">Add block</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </Draggable>
+            ))}
+
+            {blocks.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-foreground-tertiary">
+                <Plus className="w-12 h-12 mb-4 opacity-50" />
+                <p className="text-lg">Start writing...</p>
+                <p className="text-sm mt-1">Type / for blocks, or just start typing</p>
+              </div>
+            )}
+
+            {provided.placeholder}
+          </div>
+        )}
+      </Droppable>
+    </DragDropContext>
   );
+}
+
+function getDefaultContent(type) {
+  switch (type) {
+    case 'paragraph': return { text: '' };
+    case 'heading1': return { text: '' };
+    case 'heading2': return { text: '' };
+    case 'heading3': return { text: '' };
+    case 'bulleted_list': return { items: [{ text: '' }] };
+    case 'numbered_list': return { items: [{ text: '' }] };
+    case 'todo_list': return { items: [{ text: '', checked: false }] };
+    case 'code': return { code: '', language: 'javascript' };
+    case 'callout': return { type: 'info', text: '' };
+    case 'quote': return { text: '' };
+    case 'divider': return {};
+    case 'image': return { url: '', caption: '' };
+    case 'bookmark': return { url: '', title: '', description: '', image: '' };
+    case 'table': return { rows: [['', ''], ['', '']] };
+    case 'file': return { name: '', url: '', size: 0 };
+    default: return { text: '' };
+  }
 }

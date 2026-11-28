@@ -1,142 +1,151 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { Label } from '../components/ui/Label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/Card';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../components/ui/Toaster';
 
-export default function Register() {
-  const { register, loading } = useAuth();
+export function Register() {
   const navigate = useNavigate();
-  const [name, setName] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const { register } = useAuth();
+  const { toast } = useToast();
+
+  const [formData, setFormData] = useState({
+    username: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    displayName: ''
+  });
+  const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  const validate = () => {
+    const newErrors = {};
+    if (!formData.username) newErrors.username = 'Username is required';
+    else if (formData.username.length < 3) newErrors.username = 'Username must be at least 3 characters';
+    else if (!/^[a-zA-Z0-9_-]+$/.test(formData.username)) newErrors.username = 'Username can only contain letters, numbers, _, -';
+    if (!formData.password) newErrors.password = 'Password is required';
+    else if (formData.password.length < 8) newErrors.password = 'Password must be at least 8 characters';
+    if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
+    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) newErrors.email = 'Invalid email address';
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    if (!validate()) return;
 
-    if (password !== confirmPassword) {
-      setError('Пароли не совпадают');
-      return;
-    }
+    setLoading(true);
+    const result = await register({
+      username: formData.username,
+      email: formData.email || undefined,
+      password: formData.password,
+      displayName: formData.displayName || undefined
+    });
+    setLoading(false);
 
-    if (password.length < 8) {
-      setError('Пароль должен содержать минимум 8 символов');
-      return;
-    }
-
-    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-      setError('Имя пользователя может содержать только буквы, цифры и подчёркивание');
-      return;
-    }
-
-    if (username.length < 3 || username.length > 50) {
-      setError('Имя пользователя должно быть от 3 до 50 символов');
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await register(username, password, name);
-      navigate('/workspace');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSubmitting(false);
+    if (result.success) {
+      toast.success('Welcome!', 'Your account has been created');
+      navigate('/workspaces');
+    } else {
+      toast.error('Registration failed', result.error);
     }
   };
 
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-background-primary">
       <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-            </svg>
+        <CardHeader className="text-center pb-2">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary-light text-primary">
+            <span className="text-2xl">⚡</span>
           </div>
-          <CardTitle className="text-2xl">Создать аккаунт</CardTitle>
-          <CardDescription>Начните организовывать свои знания с Wrath</CardDescription>
+          <CardTitle className="text-2xl">Create your account</CardTitle>
+          <CardDescription>Start organizing your thoughts with Wrath</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Полное имя</Label>
+            <Input
+              label="Display Name"
+              name="displayName"
+              type="text"
+              value={formData.displayName}
+              onChange={handleChange}
+              error={errors.displayName}
+              placeholder="Your name"
+              autoComplete="name"
+            />
+            <Input
+              label="Username"
+              name="username"
+              type="text"
+              value={formData.username}
+              onChange={handleChange}
+              error={errors.username}
+              placeholder="Choose a username"
+              autoComplete="username"
+              autoFocus
+            />
+            <Input
+              label="Email (optional)"
+              name="email"
+              type="email"
+              value={formData.email}
+              onChange={handleChange}
+              error={errors.email}
+              placeholder="you@example.com"
+              autoComplete="email"
+            />
+            <div className="relative">
               <Input
-                id="name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Иван Иванов"
-                required
-                autoComplete="name"
-                disabled={submitting}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="username">Имя пользователя</Label>
-              <Input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="username"
-                required
-                autoComplete="username"
-                minLength={3}
-                maxLength={50}
-                disabled={submitting}
-              />
-              <p className="text-xs text-foreground-muted">Только буквы, цифры и подчёркивание</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Пароль</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
+                label="Password"
+                name="password"
+                type={showPassword ? 'text' : 'password'}
+                value={formData.password}
+                onChange={handleChange}
+                error={errors.password}
+                placeholder="At least 8 characters"
                 autoComplete="new-password"
-                minLength={8}
-                disabled={submitting}
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-[38px] text-foreground-tertiary hover:text-foreground-primary"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Подтвердите пароль</Label>
-              <Input
-                id="confirmPassword"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                autoComplete="new-password"
-                disabled={submitting}
-              />
-            </div>
-            {error && (
-              <div className="p-3 text-sm text-destructive bg-destructive/10 rounded-sm" role="alert">
-                {error}
-              </div>
-            )}
-            <Button type="submit" className="w-full" loading={submitting}>
-              Создать аккаунт
+            <Input
+              label="Confirm Password"
+              name="confirmPassword"
+              type={showPassword ? 'text' : 'password'}
+              value={formData.confirmPassword}
+              onChange={handleChange}
+              error={errors.confirmPassword}
+              placeholder="Confirm your password"
+              autoComplete="new-password"
+            />
+            <Button type="submit" className="w-full" size="lg" loading={loading}>
+              Create account
             </Button>
           </form>
         </CardContent>
-        <CardFooter className="flex-col space-y-3">
-          <p className="text-sm text-foreground-muted">
-            Уже есть аккаунт?{' '}
-            <Link to="/login" className="text-accent hover:underline font-medium">
-              Войти
+        <CardFooter className="flex-col gap-3">
+          <p className="text-sm text-foreground-secondary text-center">
+            Already have an account?{' '}
+            <Link to="/login" className="text-primary hover:underline font-medium">
+              Sign in
             </Link>
           </p>
         </CardFooter>

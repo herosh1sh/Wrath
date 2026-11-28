@@ -1,21 +1,41 @@
 import { forwardRef } from 'react';
+import { cn } from '../../lib/utils';
 
-const Input = forwardRef(({ className = '', type = 'text', error, ...props }, ref) => {
+const Input = forwardRef(({
+  className,
+  type = 'text',
+  error,
+  label,
+  hint,
+  id,
+  ...props
+}, ref) => {
+  const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
+
   return (
     <div className="w-full">
+      {label && (
+        <label htmlFor={inputId} className="block text-sm font-medium text-foreground-primary mb-1.5">
+          {label}
+        </label>
+      )}
       <input
         ref={ref}
+        id={inputId}
         type={type}
-        className={`w-full rounded-sm border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-foreground-muted transition-all duration-fast focus:border-accent focus:ring-1 focus:ring-accent ${
-          error ? 'border-destructive focus:border-destructive focus:ring-destructive' : 'border-border'
-        } ${className}`}
+        className={cn('input', error && 'input-error', className)}
         aria-invalid={error ? 'true' : 'false'}
-        aria-describedby={error ? `${props.id}-error` : undefined}
+        aria-describedby={error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined}
         {...props}
       />
       {error && (
-        <p id={`${props.id}-error`} className="mt-1 text-sm text-destructive" role="alert">
+        <p id={`${inputId}-error`} className="mt-1.5 text-sm text-error" role="alert">
           {error}
+        </p>
+      )}
+      {hint && !error && (
+        <p id={`${inputId}-hint`} className="mt-1.5 text-sm text-foreground-tertiary">
+          {hint}
         </p>
       )}
     </div>
@@ -24,4 +44,4 @@ const Input = forwardRef(({ className = '', type = 'text', error, ...props }, re
 
 Input.displayName = 'Input';
 
-export default Input;
+export { Input };

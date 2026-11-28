@@ -1,67 +1,98 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { cn } from '../lib/utils';
+import { BLOCK_TYPES, getBlockTypeIcon } from '../lib/utils';
+import { Tooltip } from './ui/Tooltip';
 
-export function SlashMenu({ isOpen, position, onClose, onSelect, blockTypes }) {
+export function SlashMenu({
+  query,
+  onSelect,
+  onClose,
+  position
+}) {
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const menuRef = useRef(null);
+  const itemRefs = useRef([]);
+
+  const filteredTypes = BLOCK_TYPES.filter(bt =>
+    bt.label.toLowerCase().includes(query.toLowerCase())
+  );
 
   useEffect(() => {
-    if (isOpen) {
-      const handleKeyDown = (e) => {
-        if (e.key === 'Escape') {
+    setSelectedIndex(0);
+  }, [query]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          setSelectedIndex(prev => (prev + 1) % filteredTypes.length);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          setSelectedIndex(prev => (prev - 1 + filteredTypes.length) % filteredTypes.length);
+          break;
+        case 'Enter':
+          e.preventDefault();
+          if (filteredTypes[selectedIndex]) {
+            onSelect(filteredTypes[selectedIndex].type);
+          }
+          break;
+        case 'Escape':
+          e.preventDefault();
           onClose();
-        } else if (e.key === 'ArrowDown') {
+          break;
+        case 'Tab':
           e.preventDefault();
-          const items = menuRef.current?.querySelectorAll('[role="menuitem"]');
-          if (items?.length) {
-            const activeIndex = Array.from(items).findIndex(item => item === document.activeElement);
-            const nextIndex = (activeIndex + 1) % items.length;
-            items[nextIndex]?.focus();
-          }
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          const items = menuRef.current?.querySelectorAll('[role="menuitem"]');
-          if (items?.length) {
-            const activeIndex = Array.from(items).findIndex(item => item === document.activeElement);
-            const prevIndex = activeIndex <= 0 ? items.length - 1 : activeIndex - 1;
-            items[prevIndex]?.focus();
-          }
-        } else if (e.key === 'Enter') {
-          e.preventDefault();
-          document.activeElement?.click();
-        }
-      };
-      document.addEventListener('keydown', handleKeyDown);
-      return () => document.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [isOpen, onClose]);
+          onClose();
+          break;
+      }
+    };
 
-  if (!isOpen) return null;
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [filteredTypes, selectedIndex, onSelect, onClose]);
 
-  return createPortal(
+  useEffect(() => {
+    itemRefs.current[selectedIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [selectedIndex]);
+
+  if (filteredTypes.length === 0) {
+    return null;
+  }
+
+  const menuContent = (
     <div
       ref={menuRef}
       className="slash-menu"
-      style={{ left: position.x, top: position.y }}
+      style={{ left: position?.x, top: position?.y }}
       role="menu"
     >
-      {blockTypes.map(type => (
+      {filteredTypes.map((blockType, index) => (
         <button
-          key={type.type}
-          onClick={() => onSelect(type)}
-          className="slash-menu-item"
+          key={blockType.type}
+          ref={(el) => { itemRefs.current[index] = el; }}
           role="menuitem"
           tabIndex={-1}
+          className={cn(
+            'slash-menu-item',
+            index === selectedIndex && 'slash-menu-item-selected'
+          )}
+          onClick={() => onSelect(blockType.type)}
+          onMouseEnter={() => setSelectedIndex(index)}
         >
-          <type.icon className="h-5 w-5 flex-shrink-0 text-foreground-muted" />
-          <span className="flex-1">{type.label}</span>
-          {type.shortcut && (
-            <kbd className="px-1.5 py-0.5 text-xs font-mono text-foreground-muted bg-muted rounded-sm">
-              {type.shortcut}
-            </kbd>
+          <span className="w-5 h-5 flex-shrink-0 flex items-center justify-center">
+            {getBlockTypeIcon(blockType.type)}
+          </span>
+          <span className="flex-1">{blockType.label}</span>
+          {blockType.shortcut && (
+            <span className="text-xs text-foreground-tertiary font-mono">{blockType.shortcut}</span>
           )}
         </button>
       ))}
-    </div>,
-    document.body
+    </div>
   );
+
+  return createPortal(menuContent, document.body);
 }

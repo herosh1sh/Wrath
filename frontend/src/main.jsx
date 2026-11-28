@@ -3,23 +3,19 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
-import { WorkspaceProvider } from './contexts/WorkspaceContext';
-import { ThemeProvider } from './contexts/ThemeContext';
 import { SocketProvider } from './contexts/SocketContext';
+import { Toaster } from './components/ui/Toaster';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
-      <ThemeProvider>
-        <AuthProvider>
-          <WorkspaceProvider>
-            <SocketProvider>
-              <App />
-            </SocketProvider>
-          </WorkspaceProvider>
-        </AuthProvider>
-      </ThemeProvider>
+      <AuthProvider>
+        <SocketProvider>
+          <App />
+          <Toaster />
+        </SocketProvider>
+      </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

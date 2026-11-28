@@ -1,117 +1,97 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { api, ApiError } from '../lib/api';
+import { useNavigate } from 'react-router-dom';
 
 const AuthContext = createContext(null);
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
-
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(() => localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
-
-  const api = useCallback(async (endpoint, options = {}) => {
-    const headers = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    const response = await fetch(`${API_URL}${endpoint}`, {
-      ...options,
-      headers,
-      credentials: 'include',
-    });
-
-    if (response.status === 401) {
-      logout();
-      throw new Error('Unauthorized');
-    }
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Ошибка запроса' }));
-      throw new Error(error.error || 'Ошибка запроса');
-    }
-
-    return response.json();
-  }, [token]);
-
-  const login = useCallback(async (username, password) => {
-    const data = await api('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    });
-    setToken(data.token);
-    localStorage.setItem('token', data.token);
-    setUser(data.user);
-    return data;
-  }, [api]);
-
-  const register = useCallback(async (username, password, name) => {
-    const data = await api('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ username, password, name }),
-    });
-    setToken(data.token);
-    localStorage.setItem('token', data.token);
-    setUser(data.user);
-    return data;
-  }, [api]);
-
-  const logout = useCallback(() => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem('token');
-  }, []);
+  const [error, setError] = useState(null);
+  const navigate = useNavigate();
 
   const fetchUser = useCallback(async () => {
-    if (!token) {
-      setLoading(false);
-      return;
-    }
     try {
-      const data = await api('/auth/me');
+      const data = await api.auth.me();
       setUser(data.user);
-    } catch {
-      setToken(null);
-      localStorage.removeItem('token');
+    } catch (err) {
+      setUser(null);
     } finally {
       setLoading(false);
     }
-  }, [api, token]);
+  }, []);
 
   useEffect(() => {
     fetchUser();
   }, [fetchUser]);
 
-  const updateProfile = useCallback(async (data) => {
-    const result = await api('/auth/profile', {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-    setUser(result.user);
-    return result;
-  }, [api]);
+  const login = async (username, password) => {
+    setError(null);
+    try {
+      const data = await api.auth.login({ username, password });
+      setUser(data.user);
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Login failed';
+      setError(message);
+      return { success: false, error: message };
+    }
+  };
 
-  const changePassword = useCallback(async (currentPassword, newPassword) => {
-    return api('/auth/change-password', {
-      method: 'POST',
-      body: JSON.stringify({ currentPassword, newPassword }),
-    });
-  }, [api]);
+  const register = async (data) => {
+    setError(null);
+    try {
+      const result = await api.auth.register(data);
+      setUser(result.user);
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Registration failed';
+      setError(message);
+      return { success: false, error: message };
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await api.auth.logout();
+    } finally {
+      setUser(null);
+      navigate('/login');
+    }
+  };
+
+  const updateProfile = async (data) => {
+    try {
+      const result = await api.auth.updateProfile(data);
+      setUser(result.user);
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Update failed';
+      return { success: false, error: message };
+    }
+  };
+
+  const changePassword = async (currentPassword, newPassword) => {
+    try {
+      await api.auth.changePassword({ currentPassword, newPassword });
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Password change failed';
+      return { success: false, error: message };
+    }
+  };
 
   const value = {
     user,
-    token,
     loading,
+    error,
     login,
     register,
     logout,
     updateProfile,
     changePassword,
-    api,
     isAuthenticated: !!user,
+    clearError: () => setError(null)
   };
 
   return (
@@ -124,7 +104,7 @@ export function AuthProvider({ children }) {
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error('useAuth must be used within AuthProvider');
   }
   return context;
 }

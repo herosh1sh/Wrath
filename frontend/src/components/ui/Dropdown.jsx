@@ -1,85 +1,142 @@
-import { useState, useRef, useEffect, Fragment } from 'react';
-import { X, ChevronDown } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { cn } from '../../lib/utils';
 
-const Dropdown = ({ children, trigger, align = 'end', className = '' }) => {
-  const [open, setOpen] = useState(false);
+function Dropdown({
+  trigger,
+  items,
+  align = 'right',
+  className,
+  onClose
+}) {
+  const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
   const triggerRef = useRef(null);
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target) &&
-          triggerRef.current && !triggerRef.current.contains(event.target)) {
-        setOpen(false);
+  const handleClickOutside = useCallback((e) => {
+    if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+      if (triggerRef.current && !triggerRef.current.contains(e.target)) {
+        setIsOpen(false);
+        onClose?.();
       }
-    };
+    }
+  }, [onClose]);
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const handleKeyDown = useCallback((e) => {
+    if (!isOpen) return;
+
+    const itemsList = dropdownRef.current?.querySelectorAll('[role="menuitem"]:not([disabled])');
+    if (!itemsList?.length) return;
+
+    const currentIndex = Array.from(itemsList).findIndex(el => el === document.activeElement);
+
+    switch (e.key) {
+      case 'Escape':
+        setIsOpen(false);
+        onClose?.();
+        triggerRef.current?.focus();
+        break;
+      case 'ArrowDown':
+        e.preventDefault();
+        const nextIndex = currentIndex < itemsList.length - 1 ? currentIndex + 1 : 0;
+        itemsList[nextIndex]?.focus();
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        const prevIndex = currentIndex > 0 ? currentIndex - 1 : itemsList.length - 1;
+        itemsList[prevIndex]?.focus();
+        break;
+      case 'Home':
+        e.preventDefault();
+        itemsList[0]?.focus();
+        break;
+      case 'End':
+        e.preventDefault();
+        itemsList[itemsList.length - 1]?.focus();
+        break;
+      case 'Tab':
+        setIsOpen(false);
+        onClose?.();
+        break;
+    }
+  }, [isOpen, onClose]);
 
   useEffect(() => {
-    const handleEscape = (event) => {
-      if (event.key === 'Escape') {
-        setOpen(false);
-      }
-    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+        document.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+  }, [isOpen, handleClickOutside, handleKeyDown]);
 
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, []);
-
-  const content = (
+  const dropdownContent = (
     <div
       ref={dropdownRef}
-      className={`absolute z-50 min-w-[160px] rounded-md border border-border bg-surface shadow-lg animate-in ${className}`}
+      className={cn('dropdown', className)}
       role="menu"
+      style={{
+        [align === 'right' ? 'right' : 'left']: 0,
+        top: '100%',
+        marginTop: '4px'
+      }}
     >
-      {children}
+      {items.map((item, index) => {
+        if (item.type === 'divider') {
+          return <div key={index} className="dropdown-divider" role="separator" />;
+        }
+
+        if (item.type === 'section') {
+          return (
+            <div key={index} className="dropdown-section">
+              {item.label}
+            </div>
+          );
+        }
+
+        return (
+          <button
+            key={index}
+            role="menuitem"
+            tabIndex={-1}
+            className={cn('dropdown-item w-full text-left', item.className)}
+            onClick={() => {
+              if (!item.disabled) {
+                item.onClick?.();
+                if (!item.keepOpen) {
+                  setIsOpen(false);
+                  onClose?.();
+                }
+              }
+            }}
+            disabled={item.disabled}
+            aria-disabled={item.disabled}
+          >
+            {item.icon && <span className="w-4 h-4 flex-shrink-0">{item.icon}</span>}
+            <span className="flex-1">{item.label}</span>
+            {item.shortcut && (
+              <span className="text-xs text-foreground-tertiary font-mono">{item.shortcut}</span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 
   return (
-    <Fragment>
-      <div ref={triggerRef} className="relative inline-block">
-        {typeof trigger === 'function' ? trigger({ open, onClick: () => setOpen(!open) }) : trigger}
+    <div className="relative inline-block">
+      <div
+        ref={triggerRef}
+        onClick={() => setIsOpen(!isOpen)}
+        className="inline-flex"
+      >
+        {trigger}
       </div>
-      {open && createPortal(content, document.body)}
-    </Fragment>
+      {isOpen && createPortal(dropdownContent, document.body)}
+    </div>
   );
-};
+}
 
-const DropdownItem = ({ children, onClick, disabled, className = '', icon, shortcut, ...props }) => {
-  const handleClick = (e) => {
-    if (!disabled && onClick) {
-      onClick(e);
-    }
-  };
-
-  return (
-    <button
-      className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground transition-colors duration-fast hover:bg-muted ${disabled ? 'opacity-50 pointer-events-none' : ''} ${className}`}
-      onClick={handleClick}
-      disabled={disabled}
-      role="menuitem"
-      {...props}
-    >
-      {icon && <span className="h-4 w-4 flex-shrink-0">{icon}</span>}
-      <span className="flex-1">{children}</span>
-      {shortcut && <kbd className="px-1.5 py-0.5 text-xs font-mono text-foreground-muted bg-muted rounded-sm">{shortcut}</kbd>}
-    </button>
-  );
-};
-
-const DropdownSeparator = ({ className = '' }) => (
-  <hr className={`border-border my-1 ${className}`} role="separator" />
-);
-
-const DropdownLabel = ({ children, className = '' }) => (
-  <div className={`px-3 py-2 text-xs font-medium text-foreground-muted uppercase tracking-wide ${className}`}>
-    {children}
-  </div>
-);
-
-export { Dropdown, DropdownItem, DropdownSeparator, DropdownLabel };
+export { Dropdown };

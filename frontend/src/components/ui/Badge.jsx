@@ -1,18 +1,25 @@
 import { forwardRef } from 'react';
+import { cn } from '../../lib/utils';
 
-const Badge = forwardRef(({ className = '', variant = 'default', children, ...props }, ref) => {
+const Badge = forwardRef(({
+  children,
+  variant = 'default',
+  className,
+  ...props
+}, ref) => {
   const variants = {
-    default: 'bg-muted text-foreground-muted',
-    primary: 'bg-primary/10 text-primary',
-    success: 'bg-success/10 text-success',
-    warning: 'bg-warning/10 text-warning',
-    destructive: 'bg-destructive/10 text-destructive',
+    default: 'badge badge-primary',
+    secondary: 'badge badge-secondary',
+    success: 'badge badge-success',
+    warning: 'badge badge-warning',
+    error: 'badge badge-error',
+    outline: 'badge badge-outline'
   };
 
   return (
     <span
       ref={ref}
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${variants[variant]} ${className}`}
+      className={cn(variants[variant], className)}
       {...props}
     >
       {children}
@@ -22,4 +29,4 @@ const Badge = forwardRef(({ className = '', variant = 'default', children, ...pr
 
 Badge.displayName = 'Badge';
 
-export default Badge;
+export { Badge };

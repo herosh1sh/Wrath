@@ -6,25 +6,26 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
+      '@': path.resolve(__dirname, './src')
+    }
   },
   server: {
-    port: 3000,
+    port: 5173,
+    host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:4000',
-        changeOrigin: true,
-      },
-      '/uploads': {
-        target: 'http://localhost:4000',
-        changeOrigin: true,
+        target: 'http://localhost:3000',
+        changeOrigin: true
       },
       '/socket.io': {
-        target: 'http://localhost:4000',
-        ws: true,
+        target: 'http://localhost:3000',
+        ws: true
       },
-    },
+      '/uploads': {
+        target: 'http://localhost:3000',
+        changeOrigin: true
+      }
+    }
   },
   build: {
     outDir: 'dist',
@@ -33,10 +34,10 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
-          ui: ['lucide-react'],
-          utils: ['date-fns', 'zustand', 'marked', 'dompurify'],
-        },
-      },
-    },
-  },
+          ui: ['lucide-react', 'clsx', 'tailwind-merge'],
+          editor: ['@hello-pangea/dnd', 'react-markdown', 'rehype-highlight']
+        }
+      }
+    }
+  }
 });

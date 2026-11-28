@@ -1,42 +1,43 @@
 import { forwardRef } from 'react';
+import { cn } from '../../lib/utils';
+import { getInitials } from '../../lib/utils';
 
-const Avatar = forwardRef(({ className = '', src, alt, fallback, size = 'default', ...props }, ref) => {
+const Avatar = forwardRef(({
+  src,
+  alt,
+  name,
+  size = 'md',
+  className,
+  ...props
+}, ref) => {
   const sizes = {
-    xs: 'h-6 w-6 text-xs',
-    sm: 'h-8 w-8 text-sm',
-    default: 'h-10 w-10 text-base',
-    lg: 'h-12 w-12 text-lg',
-    xl: 'h-16 w-16 text-xl',
+    sm: 'avatar-sm',
+    md: 'avatar-md',
+    lg: 'avatar-lg',
+    xl: 'avatar-xl'
   };
 
-  const [imageError, setImageError] = useState(false);
-
-  if (src && !imageError) {
-    return (
-      <img
-        ref={ref}
-        src={src}
-        alt={alt || fallback || 'Avatar'}
-        className={`rounded-full object-cover ${sizes[size]} ${className}`}
-        onError={() => setImageError(true)}
-        {...props}
-      />
-    );
-  }
+  const initials = name ? getInitials(name) : '?';
 
   return (
     <div
       ref={ref}
-      className={`flex items-center justify-center rounded-full bg-muted font-medium ${sizes[size]} ${className}`}
+      className={cn('avatar', sizes[size], className)}
       {...props}
     >
-      {fallback || alt?.charAt(0)?.toUpperCase() || '?'}
+      {src ? (
+        <img
+          src={src}
+          alt={alt || name || 'Avatar'}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <span className="font-medium">{initials}</span>
+      )}
     </div>
   );
 });
 
 Avatar.displayName = 'Avatar';
 
-import { useState } from 'react';
-
-export default Avatar;
+export { Avatar };

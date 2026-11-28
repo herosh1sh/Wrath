@@ -1,88 +1,80 @@
-import { useState, useRef, useEffect, Fragment } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { cn } from '../../lib/utils';
 
-const Tooltip = ({ children, content, position = 'top', delay = 200, className = '' }) => {
-  const [open, setOpen] = useState(false);
-  const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
-  const triggerRef = useRef(null);
-  const tooltipRef = useRef(null);
+function Tooltip({
+  children,
+  content,
+  position = 'top',
+  delay = 200,
+  className
+}) {
+  const [isVisible, setIsVisible] = useState(false);
   const timeoutRef = useRef(null);
+  const tooltipRef = useRef(null);
+  const childRef = useRef(null);
 
   const showTooltip = () => {
     timeoutRef.current = setTimeout(() => {
-      setOpen(true);
-      updatePosition();
+      setIsVisible(true);
     }, delay);
   };
 
   const hideTooltip = () => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    setOpen(false);
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    setIsVisible(false);
   };
 
-  const updatePosition = () => {
-    if (!triggerRef.current || !tooltipRef.current) return;
-
-    const triggerRect = triggerRef.current.getBoundingClientRect();
-    const tooltipRect = tooltipRef.current.getBoundingClientRect();
-    const gap = 8;
-
-    let top, left;
-
-    switch (position) {
-      case 'top':
-        top = triggerRect.top - tooltipRect.height - gap;
-        left = triggerRect.left + (triggerRect.width - tooltipRect.width) / 2;
-        break;
-      case 'bottom':
-        top = triggerRect.bottom + gap;
-        left = triggerRect.left + (triggerRect.width - tooltipRect.width) / 2;
-        break;
-      case 'left':
-        top = triggerRect.top + (triggerRect.height - tooltipRect.height) / 2;
-        left = triggerRect.left - tooltipRect.width - gap;
-        break;
-      case 'right':
-        top = triggerRect.top + (triggerRect.height - tooltipRect.height) / 2;
-        left = triggerRect.right + gap;
-        break;
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      hideTooltip();
     }
-
-    setTooltipPosition({ top, left });
   };
 
   useEffect(() => {
-    if (open) {
-      updatePosition();
-      window.addEventListener('scroll', updatePosition, true);
-      window.addEventListener('resize', updatePosition);
-      return () => {
-        window.removeEventListener('scroll', updatePosition, true);
-        window.removeEventListener('resize', updatePosition);
-      };
+    if (isVisible) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
     }
-  }, [open, position]);
+  }, [isVisible]);
 
-  const tooltip = open && createPortal(
+  const positions = {
+    top: 'bottom-full left-1/2 -translate-x-1/2 mb-2',
+    bottom: 'top-full left-1/2 -translate-x-1/2 mt-2',
+    left: 'right-full top-1/2 -translate-y-1/2 mr-2',
+    right: 'left-full top-1/2 -translate-y-1/2 ml-2'
+  };
+
+  const tooltipContent = isVisible && content && (
     <div
       ref={tooltipRef}
-      style={tooltipPosition}
-      className={`absolute z-50 px-2 py-1 text-xs font-medium text-white bg-foreground rounded-sm shadow-lg animate-in ${className}`}
+      className={cn('tooltip', positions[position], className)}
       role="tooltip"
+      id="tooltip"
     >
       {content}
-    </div>,
-    document.body
+    </div>
   );
+
+  const childWithProps = React.Children.only(children);
+  const enhancedChild = React.cloneElement(childWithProps, {
+    ref: childRef,
+    onMouseEnter: showTooltip,
+    onMouseLeave: hideTooltip,
+    onFocus: showTooltip,
+    onBlur: hideTooltip,
+    'aria-describedby': isVisible ? 'tooltip' : undefined
+  });
 
   return (
-    <Fragment>
-      <span ref={triggerRef} onMouseEnter={showTooltip} onMouseLeave={hideTooltip} onFocus={showTooltip} onBlur={hideTooltip}>
-        {children}
-      </span>
-      {tooltip}
-    </Fragment>
+    <>
+      {enhancedChild}
+      {createPortal(tooltipContent, document.body)}
+    </>
   );
-};
+}
 
-export default Tooltip;
+import React from 'react';
+export { Tooltip };

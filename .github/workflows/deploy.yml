@@ -1,4 +1,4 @@
-name: Build & Deploy Wrath
+name: Deploy Wrath
 
 on:
   push:
@@ -6,26 +6,51 @@ on:
   workflow_dispatch:
 
 env:
+  PROJECT_DIR: /opt/wrath
   REGISTRY: ghcr.io
-  IMAGE_BACKEND: ${{ github.repository_owner }}/wrath-backend
-  IMAGE_FRONTEND: ${{ github.repository_owner }}/wrath-frontend
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
+  test:
+    name: Run Tests
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-
     steps:
-      - name: Checkout repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        run: cd backend && npm ci
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Run backend tests
+        run: cd backend && npm test
+
+      - name: Build frontend
+        run: cd frontend && npm run build
+
+      - name: Lint frontend
+        run: cd frontend && npm run lint
+
+  build:
+    name: Build Docker Images
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
+      - name: Log in to Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -36,14 +61,15 @@ jobs:
         id: meta-backend
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_BACKEND }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
           tags: |
             type=ref,event=branch
+            type=ref,event=pr
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Backend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v5
         with:
           context: ./backend
           push: true
@@ -56,14 +82,15 @@ jobs:
         id: meta-frontend
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_FRONTEND }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
           tags: |
             type=ref,event=branch
+            type=ref,event=pr
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Frontend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v5
         with:
           context: ./frontend
           push: true
@@ -73,36 +100,67 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
+    name: Deploy to Server
+    needs: build
     if: github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-      packages: read
-
+    runs-on: ubuntu-latest
     steps:
-      - name: Deploy to server via SSH
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to server
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
+          port: ${{ secrets.SERVER_PORT }}
           script: |
-            set -e
-            cd /opt/wrath
-
-            # Pull latest images
-            docker compose pull
-
-            # Restart services (volumes persist data)
-            docker compose up -d --remove-orphans
-
-            # Clean up old images
+            cd ${{ env.PROJECT_DIR }}
+            git fetch origin
+            git reset --hard origin/main
+            source .env
+            docker-compose pull
+            docker-compose build --no-cache
+            docker-compose up -d
+            docker-compose exec -T backend npm run db:init
             docker image prune -f
 
-            # Health check
-            sleep 5
-            curl -f https://wrath.heroshish.ru/api/health || exit 1
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            sleep 15
+            cd ${{ env.PROJECT_DIR }}
+            docker-compose ps
+            curl -f https://wrath.heroshish.ru/health || exit 1
 
-            echo "✅ Deployment successful!"
+  notify:
+    name: Notify
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Send notification
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "❌ Wrath deployment failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Wrath Deployment Failed*\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\n<a href=\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\">View Logs</a>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

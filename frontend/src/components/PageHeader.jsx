@@ -1,268 +1,107 @@
-import { useState, useRef, useEffect } from 'react';
-import { Pen, Image as ImageIcon, X, Palette, Trash2, Download, Star, MoreVertical } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { cn } from '../lib/utils';
+import { Star, Tag, Share2, MoreHorizontal, ChevronDown, Copy, Link as LinkIcon, X, Check, Loader2 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
-import { Dropdown, DropdownItem, DropdownSeparator } from './ui/Dropdown';
-import { Modal, ModalContent, ModalFooter } from './ui/Modal';
-import Tooltip from './ui/Tooltip';
-import { uploadApi } from '../lib/api';
+import { Badge } from './ui/Badge';
+import { Dropdown } from './ui/Dropdown';
+import { Tooltip } from './ui/Tooltip';
+import { Modal } from './ui/Modal';
+import { Avatar } from './ui/Avatar';
+import { ICONS } from '../lib/utils';
+import { useToast } from './ui/Toaster';
 
 export function PageHeader({
   page,
-  workspace,
-  user,
-  isFavorite,
+  onFavorite,
+  onAddTag,
+  onRemoveTag,
+  newTag,
+  setNewTag,
+  showTagInput,
+  setShowTagInput,
+  showPageMenu,
+  setShowPageMenu,
+  pageMenuItems,
+  publishedUrl,
+  showPublishModal,
+  setShowPublishModal,
+  copyPublishedUrl,
   saving,
-  saveError,
-  onTitleChange,
-  onIconChange,
-  onCoverChange,
-  onFavoriteToggle,
-  onShowMenu,
+  saveError
 }) {
-  const [coverUrl, setCoverUrl] = useState(page.coverUrl || '');
-  const [coverPosition, setCoverPosition] = useState(page.coverPosition || 0.5);
-  const [showCoverInput, setShowCoverInput] = useState(false);
+  const { toast } = useToast();
+  const [icon, setIcon] = useState(page.icon || '📄');
+  const [coverUrl, setCoverUrl] = useState(page.cover_url || '');
   const [showIconPicker, setShowIconPicker] = useState(false);
-  const [uploadingCover, setUploadingCover] = useState(false);
-  const coverInputRef = useRef(null);
-  const coverImgRef = useRef(null);
+  const [showCoverInput, setShowCoverInput] = useState(false);
+  const iconSearchRef = useRef('');
 
-  const icons = [
-    '⚔️', '📄', '📋', '📚', '📖', '📔', '📕', '📗', '📘', '📙',
-    '🗂️', '🗃️', '🗄️', '📁', '📂', '🗒️', '🗓️', '📅', '📆', '📇',
-    '🏠', '🏢', '🏭', '🏫', '🏪', '🏬', '🏭', '🏯', '🏰', '💒',
-    '⚙️', '🔧', '🔨', '⚡', '🔋', '💡', '🔍', '🔎', '🔑', '🗝️',
-    '🎯', '🎨', '🎭', '🎪', '🎫', '🎬', '🎮', '🕹️', '🎲', '♟️',
-    '🌟', '⭐', '💫', '✨', '🌙', '☀️', '⭐', '☁️', '⛈️', '🌈',
-    '🍎', '🍏', '🍊', '🍋', '🍇', '🍓', '🍒', '🍑', '🥭', '🍍',
-    '🚀', '🛸', '🛩️', '✈️', '🛫', '🛬', '🚁', '🚂', '🚀', '⛵',
-  ];
-
-  const colors = [
-    '#0891B2', '#059669', '#D97706', '#DC2626', '#7C3AED', '#DB2777',
-    '#0891B2', '#0D9488', '#CA8A04', '#65A30D', '#2563EB', '#9333EA',
-  ];
-
-  // Handle cover image upload
-  const handleCoverUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      alert('Пожалуйста, выберите файл изображения');
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Изображение должно быть меньше 5 МБ');
-      return;
-    }
-
-    setUploadingCover(true);
-    try {
-      const data = await uploadApi.upload(file);
-      const newCoverUrl = data.url;
-      setCoverUrl(newCoverUrl);
-      onCoverChange(newCoverUrl, coverPosition);
-    } catch (err) {
-      console.error('Failed to upload cover:', err);
-      alert('Не удалось загрузить обложку');
-    } finally {
-      setUploadingCover(false);
-      e.target.value = '';
-    }
+  const handleTitleChange = (e) => {
+    // Title is handled by the editor
   };
 
-  // Handle cover URL input
-  const handleCoverUrlSubmit = (e) => {
+  const handleIconSelect = (selectedIcon) => {
+    setIcon(selectedIcon);
+    // In a real app, you'd save this to the backend
+  };
+
+  const handleCoverSubmit = (e) => {
     e.preventDefault();
-    if (coverUrl.trim()) {
-      onCoverChange(coverUrl.trim(), coverPosition);
-    }
+    setCoverUrl(coverUrl);
     setShowCoverInput(false);
   };
 
-  // Handle cover removal
-  const handleRemoveCover = () => {
-    setCoverUrl('');
-    onCoverChange(null, 0.5);
-  };
-
-  // Handle cover reposition
-  const handleCoverReposition = (e) => {
-    if (!coverImgRef.current) return;
-    const rect = coverImgRef.current.getBoundingClientRect();
-    const newPosition = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-    setCoverPosition(newPosition);
-    onCoverChange(coverUrl, newPosition);
-  };
-
-  // Handle icon selection
-  const handleIconSelect = (icon) => {
-    onIconChange(icon, page.iconColor || colors[0]);
-    setShowIconPicker(false);
-  };
-
-  // Handle icon color selection
-  const handleColorSelect = (color) => {
-    onIconChange(page.icon || '⚔️', color);
-  };
-
-  // Handle drag over for cover reposition
-  const handleDragOver = (e) => {
-    e.preventDefault();
-    handleCoverReposition(e);
+  const tagColors = {
+    'Important': 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
+    'Ideas': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+    'Projects': 'bg-sage-100 text-sage-700 dark:bg-sage-900/30 dark:text-sage-400',
+    'Personal': 'bg-lavender-100 text-lavender-700 dark:bg-lavender-900/30 dark:text-lavender-400',
+    'Reference': 'bg-sage-100 text-sage-700 dark:bg-sage-900/30 dark:text-sage-400'
   };
 
   return (
-    <header className="relative">
-      {/* Cover image */}
-      {(coverUrl || showCoverInput) && (
-        <div
-          className="relative h-48 w-full overflow-hidden"
-          onMouseDown={handleDragOver}
-          onMouseMove={(e) => e.buttons === 1 && handleCoverReposition(e)}
-        >
-          {coverUrl && (
-            <img
-              ref={coverImgRef}
-              src={coverUrl}
-              alt="Обложка страницы"
-              className="absolute inset-0 w-full h-full object-cover transition-transform duration-100"
-              style={{ transform: `translateY(${coverPosition * 30}%)` }}
-            />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-background/60 via-transparent to-transparent" />
-
-          {/* Cover actions */}
-          <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
-            <div className="flex items-center gap-2">
-              <Tooltip content="Сменить обложку" position="top">
-                <button
-                  onClick={() => setShowCoverInput(true)}
-                  className="btn-icon bg-surface/80 backdrop-blur-sm text-foreground hover:bg-surface"
-                  aria-label="Сменить обложку"
-                >
-                  <ImageIcon className="h-4 w-4" />
-                </button>
-              </Tooltip>
-              <Tooltip content="Удалить обложку" position="top">
-                <button
-                  onClick={handleRemoveCover}
-                  className="btn-icon bg-surface/80 backdrop-blur-sm text-foreground hover:bg-surface"
-                  aria-label="Удалить обложку"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </Tooltip>
-              <Tooltip content="Переместить обложку" position="top">
-                <button
-                  className="btn-icon bg-surface/80 backdrop-blur-sm text-foreground hover:bg-surface cursor-n-resize"
-                  aria-label="Переместить обложку"
-                >
-                  <Palette className="h-4 w-4" />
-                </button>
-              </Tooltip>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Tooltip content="Скачать обложку" position="top">
-                <a href={coverUrl} download className="btn-icon bg-surface/80 backdrop-blur-sm text-foreground hover:bg-surface">
-                  <Download className="h-4 w-4" />
-                </a>
-              </Tooltip>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Cover input modal */}
-      {showCoverInput && (
-        <Modal
-          isOpen={showCoverInput}
-          onClose={() => setShowCoverInput(false)}
-          title="Сменить обложку"
-          description="Загрузите изображение или введите URL изображения"
-        >
-          <ModalContent className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">Загрузить изображение</label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleCoverUpload}
-                className="input"
-                disabled={uploadingCover}
-              />
-              {uploadingCover && <p className="text-sm text-foreground-muted mt-1">Загрузка...</p>}
-            </div>
-            <DropdownSeparator />
-            <form onSubmit={handleCoverUrlSubmit} className="space-y-2">
-              <label className="block text-sm font-medium">URL изображения</label>
-              <Input
-                value={coverUrl}
-                onChange={(e) => setCoverUrl(e.target.value)}
-                placeholder="https://example.com/image.jpg"
-                autoFocus
-              />
-              <div className="flex justify-end gap-2">
-                <Button variant="ghost" type="button" onClick={() => setShowCoverInput(false)}>
-                  Отмена
-                </Button>
-                <Button type="submit" disabled={!coverUrl.trim() || uploadingCover}>
-                  Применить
-                </Button>
-              </div>
-            </form>
-          </ModalContent>
-        </Modal>
-      )}
-
-      {/* Page title area */}
-      <div className="px-6 py-4">
+    <header className="page-header">
+      <div className="max-w-4xl mx-auto flex flex-col gap-4">
+        {/* Icon, Title, Favorite */}
         <div className="flex items-start gap-4">
           {/* Icon picker */}
-          <div className="relative flex-shrink-0">
-            <button
-              onClick={() => setShowIconPicker(true)}
-              className="flex items-center justify-center w-12 h-12 rounded-sm bg-muted text-2xl hover:bg-muted-foreground/10 transition-colors"
-              aria-label="Сменить иконку"
-            >
-              {page.icon || '⚔️'}
-            </button>
+          <div className="relative">
+            <Tooltip content="Change icon" position="bottom">
+              <button
+                onClick={() => setShowIconPicker(!showIconPicker)}
+                className={cn(
+                  'w-12 h-12 rounded-xl flex items-center justify-center text-2xl transition-colors',
+                  'hover:bg-background-hover',
+                  showIconPicker && 'ring-2 ring-primary'
+                )}
+                aria-label="Change page icon"
+              >
+                {icon}
+              </button>
+            </Tooltip>
 
-            {/* Icon picker dropdown */}
             {showIconPicker && (
-              <div className="absolute left-0 top-full mt-2 z-50 w-80 bg-surface border border-border rounded-md shadow-xl p-3 animate-in">
-                <div className="mb-3">
-                  <label className="block text-sm font-medium mb-2">Цвет иконки</label>
-                  <div className="flex flex-wrap gap-2">
-                    {colors.map(color => (
-                      <button
-                        key={color}
-                        onClick={() => handleColorSelect(color)}
-                        className={`w-8 h-8 rounded-sm border-2 transition-colors ${
-                          page.iconColor === color ? 'border-accent scale-110' : 'border-transparent hover:border-border'
-                        }`}
-                        style={{ backgroundColor: color }}
-                        aria-label={`Цвет ${color}`}
-                      />
-                    ))}
-                  </div>
+              <div className="absolute top-full left-0 mt-2 z-50 bg-background-primary border border-border-light rounded-xl shadow-lg p-3 w-80 max-h-60 overflow-y-auto animate-slide-down">
+                <div className="mb-2">
+                  <input
+                    ref={iconSearchRef}
+                    type="text"
+                    placeholder="Search icons..."
+                    className="w-full px-3 py-2 text-sm bg-background-tertiary border border-border-light rounded-lg focus:border-border-focus focus:ring-2 focus:ring-primary-light"
+                    onChange={(e) => iconSearchRef.current = e.target.value}
+                    autoFocus
+                  />
                 </div>
-                <DropdownSeparator />
-                <div className="grid grid-cols-8 gap-1 max-h-60 overflow-auto">
-                  {icons.map(icon => (
+                <div className="grid grid-cols-8 gap-1">
+                  {ICONS.filter(ic => ic.toLowerCase().includes(iconSearchRef.current.toLowerCase())).map((ic, index) => (
                     <button
-                      key={icon}
-                      onClick={() => handleIconSelect(icon)}
-                      className={`p-2 text-2xl rounded-sm transition-colors hover:bg-muted ${
-                        page.icon === icon ? 'bg-muted ring-2 ring-accent' : ''
-                      }`}
-                      aria-label={`Иконка ${icon}`}
+                      key={index}
+                      onClick={() => { handleIconSelect(ic); setShowIconPicker(false); }}
+                      className="p-2 rounded-lg hover:bg-background-hover transition-colors text-2xl"
+                      aria-label={`Select ${ic}`}
                     >
-                      {icon}
+                      {ic}
                     </button>
                   ))}
                 </div>
@@ -270,63 +109,242 @@ export function PageHeader({
             )}
           </div>
 
-          {/* Title input */}
+          {/* Title */}
           <div className="flex-1 min-w-0">
-            <Input
-              value={page.title}
-              onChange={(e) => onTitleChange(e.target.value)}
-              placeholder="Без названия"
-              className="text-2xl font-semibold bg-transparent border-none focus:ring-0 placeholder:text-foreground-muted"
-              style={{ fontFamily: 'inherit' }}
-              autoFocus
-            />
-            <div className="flex items-center gap-3 mt-2 text-sm text-foreground-muted">
-              <span>Последний редактор: {page.last_edited_by === user?.id ? 'Вы' : 'Кто-то'} • {new Date(page.updated_at).toLocaleString()}</span>
-            </div>
+            <h1
+              contentEditable={true}
+              onInput={handleTitleChange}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+              onPaste={(e) => { e.preventDefault(); const text = e.clipboardData.getData('text/plain'); document.execCommand('insertText', false, text); }}
+              className={cn(
+                'text-3xl font-display font-bold text-foreground-primary min-h-[3rem]',
+                'focus:outline-none focus:ring-2 focus:ring-primary-light focus:ring-offset-1 rounded',
+                'prose prose-neutral max-w-none',
+                'placeholder:text-foreground-tertiary'
+              )}
+              data-placeholder="Untitled"
+              spellCheck={true}
+              suppressContentEditableWarning
+            >
+              {page.title}
+            </h1>
           </div>
 
-          {/* Favorite button */}
-          <Tooltip content={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'} position="bottom">
+          {/* Favorite */}
+          <Tooltip content={page.isFavorited ? 'Remove from favorites' : 'Add to favorites'} position="bottom">
             <button
-              onClick={onFavoriteToggle}
-              className={`btn-icon p-2 rounded-full transition-colors ${isFavorite ? 'text-warning bg-warning/10' : 'text-foreground-muted hover:bg-muted'}`}
-              aria-label={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+              onClick={onFavorite}
+              className={cn(
+                'p-2 rounded-lg transition-colors flex-shrink-0',
+                page.isFavorited
+                  ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/30'
+                  : 'text-foreground-tertiary hover:text-amber-500 hover:bg-background-hover'
+              )}
+              aria-label={page.isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+              aria-pressed={page.isFavorited}
             >
-              <Star className={`h-5 w-5 ${isFavorite ? 'fill-current' : ''}`} />
+              <Star className={cn('w-5 h-5', page.isFavorited && 'fill-current')} />
             </button>
           </Tooltip>
 
           {/* Page menu */}
-          <Tooltip content="Параметры страницы" position="bottom">
-            <button
-              onClick={onShowMenu}
-              className="btn-icon p-2 rounded-full text-foreground-muted hover:bg-muted transition-colors"
-              aria-label="Параметры страницы"
-            >
-              <MoreVertical className="h-5 w-5" />
-            </button>
+          <Tooltip content="Page options" position="bottom">
+            <Dropdown
+              trigger={
+                <button
+                  onClick={() => setShowPageMenu(!showPageMenu)}
+                  className={cn(
+                    'p-2 rounded-lg transition-colors text-foreground-tertiary hover:text-foreground-primary hover:bg-background-hover',
+                    showPageMenu && 'bg-background-hover'
+                  )}
+                  aria-label="Page options"
+                  aria-expanded={showPageMenu}
+                >
+                  <MoreHorizontal className="w-5 h-5" />
+                </button>
+              }
+              items={pageMenuItems}
+              align="right"
+            />
           </Tooltip>
+        </div>
+
+        {/* Tags, Cover, Published */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Tags */}
+          <div className="flex items-center gap-2">
+            {(page.tags || []).map(tag => (
+              <Tooltip key={tag.name} content="Remove tag" position="top">
+                <Badge
+                  variant="default"
+                  className={cn('gap-1', tagColors[tag.name] || 'bg-primary-light text-primary')}
+                  onClick={() => onRemoveTag(tag.id)}
+                >
+                  {tag.name}
+                  <X className="w-3 h-3 hover:opacity-100 transition-opacity cursor-pointer" />
+                </Badge>
+              </Tooltip>
+            ))}
+
+            {showTagInput ? (
+              <form onSubmit={onAddTag} className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={newTag}
+                  onChange={(e) => setNewTag(e.target.value)}
+                  placeholder="Add tag..."
+                  className="px-2 py-1 text-sm bg-background-tertiary border border-border-light rounded-lg focus:border-border-focus focus:ring-2 focus:ring-primary-light w-32"
+                  autoFocus
+                />
+                <button type="submit" className="p-1.5 text-foreground-tertiary hover:text-primary">
+                  <Check className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowTagInput(false); setNewTag(''); }}
+                  className="p-1.5 text-foreground-tertiary hover:text-error"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </form>
+            ) : (
+              <Tooltip content="Add tag" position="bottom">
+                <button
+                  onClick={() => setShowTagInput(true)}
+                  className="p-1.5 text-foreground-tertiary hover:text-primary rounded-lg transition-colors"
+                  aria-label="Add tag"
+                >
+                  <Tag className="w-4 h-4" />
+                </button>
+              </Tooltip>
+            )}
+          </div>
+
+          {/* Cover image */}
+          <div className="relative">
+            {coverUrl ? (
+              <div className="relative h-20 w-40 rounded-lg overflow-hidden">
+                <img
+                  src={coverUrl}
+                  alt="Cover"
+                  className="w-full h-full object-cover"
+                />
+                <Tooltip content="Change cover" position="top">
+                  <button
+                    onClick={() => setShowCoverInput(true)}
+                    className="absolute bottom-1 right-1 p-1.5 bg-background-primary/90 backdrop-blur rounded hover:bg-background-hover transition-colors opacity-0 group-hover:opacity-100 transition-opacity"
+                    aria-label="Change cover"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Remove cover" position="top">
+                  <button
+                    onClick={() => setCoverUrl('')}
+                    className="absolute bottom-1 left-1 p-1.5 bg-background-primary/90 backdrop-blur rounded hover:bg-background-hover transition-colors opacity-0 group-hover:opacity-100 transition-opacity text-error"
+                    aria-label="Remove cover"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </Tooltip>
+              </div>
+            ) : (
+              <Tooltip content="Add cover" position="bottom">
+                <button
+                  onClick={() => setShowCoverInput(true)}
+                  className="h-20 w-40 border-2 border-dashed border-border-default rounded-lg flex items-center justify-center text-foreground-tertiary hover:border-primary hover:text-primary transition-colors"
+                  aria-label="Add cover image"
+                >
+                  <span className="text-sm">Add cover</span>
+                </button>
+              </Tooltip>
+            )}
+
+            {showCoverInput && (
+              <form onSubmit={handleCoverSubmit} className="absolute top-full left-0 mt-2 w-64 animate-slide-down">
+                <div className="bg-background-primary border border-border-light rounded-lg shadow-lg p-2">
+                  <Input
+                    type="url"
+                    placeholder="Image URL"
+                    value={coverUrl}
+                    onChange={(e) => setCoverUrl(e.target.value)}
+                    className="mb-2"
+                  />
+                  <div className="flex justify-end gap-1">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setShowCoverInput(false)}>Cancel</Button>
+                    <Button type="submit" variant="primary" size="sm">Apply</Button>
+                  </div>
+                </div>
+              </form>
+            )}
+          </div>
+
+          {/* Publish status */}
+          {publishedUrl && (
+            <Tooltip content="Copy public link" position="bottom">
+              <button
+                onClick={copyPublishedUrl}
+                className="px-3 py-1.5 bg-primary-light text-primary rounded-lg text-sm font-medium flex items-center gap-1 hover:bg-primary/90 transition-colors"
+              >
+                <LinkIcon className="w-4 h-4" />
+                Public
+              </button>
+            </Tooltip>
+          )}
+
+          {/* Save indicator */}
+          <div className="flex items-center gap-1.5 text-xs">
+            {saving && (
+              <span className="flex items-center gap-1 text-foreground-secondary">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Saving...
+              </span>
+            )}
+            {!saving && !saveError && (
+              <span className="text-foreground-tertiary flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-success" />
+                Saved
+              </span>
+            )}
+            {saveError && (
+              <span className="text-error flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-error" />
+                Save failed
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Save status indicator */}
-      {(saving || saveError) && (
-        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-sm bg-surface border border-border shadow-lg text-sm animate-in">
-          {saving && (
-            <>
-              <div className="h-4 w-4 animate-spin border-2 border-accent border-t-transparent rounded-full" />
-              <span>Сохранение...</span>
-            </>
-          )}
-          {saveError && (
-            <>
-              <span className="text-destructive">Ошибка сохранения: {saveError}</span>
-              <button className="btn-icon p-1 text-foreground-muted hover:text-foreground" onClick={() => setSaveError(null)}>
-                <X className="h-3 w-3" />
-              </button>
-            </>
-          )}
-        </div>
+      {/* Publish modal */}
+      {showPublishModal && (
+        <Modal
+          isOpen={showPublishModal}
+          onClose={() => setShowPublishModal(false)}
+          title="Page Published"
+          description="Your page is now publicly accessible"
+        >
+          <div className="space-y-3">
+            <div className="p-3 bg-background-tertiary rounded-lg flex items-center gap-2">
+              <input
+                type="text"
+                value={publishedUrl}
+                readOnly
+                className="flex-1 text-sm bg-transparent border-none focus:outline-none text-foreground-primary"
+              />
+              <Button variant="outline" size="sm" onClick={copyPublishedUrl}>
+                <Copy className="w-4 h-4 mr-1" />
+                Copy
+              </Button>
+            </div>
+            <p className="text-sm text-foreground-secondary">
+              Anyone with this link can view your page. Changes sync automatically.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="ghost" onClick={() => setShowPublishModal(false)}>Done</Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </header>
   );

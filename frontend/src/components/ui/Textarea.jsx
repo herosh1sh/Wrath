@@ -1,20 +1,41 @@
 import { forwardRef } from 'react';
+import { cn } from '../../lib/utils';
 
-const Textarea = forwardRef(({ className = '', error, ...props }, ref) => {
+const Textarea = forwardRef(({
+  className,
+  error,
+  label,
+  hint,
+  id,
+  rows = 3,
+  ...props
+}, ref) => {
+  const textareaId = id || label?.toLowerCase().replace(/\s+/g, '-');
+
   return (
     <div className="w-full">
+      {label && (
+        <label htmlFor={textareaId} className="block text-sm font-medium text-foreground-primary mb-1.5">
+          {label}
+        </label>
+      )}
       <textarea
         ref={ref}
-        className={`w-full min-h-[100px] rounded-sm border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-foreground-muted transition-all duration-fast focus:border-accent focus:ring-1 focus:ring-accent resize-y ${
-          error ? 'border-destructive focus:border-destructive focus:ring-destructive' : 'border-border'
-        } ${className}`}
+        id={textareaId}
+        rows={rows}
+        className={cn('input min-h-[80px] resize-y', error && 'input-error', className)}
         aria-invalid={error ? 'true' : 'false'}
-        aria-describedby={error ? `${props.id}-error` : undefined}
+        aria-describedby={error ? `${textareaId}-error` : hint ? `${textareaId}-hint` : undefined}
         {...props}
       />
       {error && (
-        <p id={`${props.id}-error`} className="mt-1 text-sm text-destructive" role="alert">
+        <p id={`${textareaId}-error`} className="mt-1.5 text-sm text-error" role="alert">
           {error}
+        </p>
+      )}
+      {hint && !error && (
+        <p id={`${textareaId}-hint`} className="mt-1.5 text-sm text-foreground-tertiary">
+          {hint}
         </p>
       )}
     </div>
@@ -23,4 +44,4 @@ const Textarea = forwardRef(({ className = '', error, ...props }, ref) => {
 
 Textarea.displayName = 'Textarea';
 
-export default Textarea;
+export { Textarea };

@@ -1,135 +1,175 @@
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_BASE = '/api';
 
-let authToken = null;
-
-export function setAuthToken(token) {
-  authToken = token;
+class ApiError extends Error {
+  constructor(message, status, code, details) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
 }
 
-export async function api(endpoint, options = {}) {
-  const headers = {
-    'Content-Type': 'application/json',
-    ...options.headers,
+async function request(endpoint, options = {}) {
+  const url = `${API_BASE}${endpoint}`;
+
+  const config = {
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers
+    },
+    credentials: 'include',
+    ...options
   };
 
-  if (authToken) {
-    headers.Authorization = `Bearer ${authToken}`;
+  if (options.body && typeof options.body === 'object') {
+    config.body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(`${API_URL}${endpoint}`, {
-    ...options,
-    headers,
-    credentials: 'include',
-  });
+  try {
+    const response = await fetch(url, config);
 
-  if (response.status === 401) {
-    authToken = null;
-    localStorage.removeItem('token');
-    window.location.href = '/login';
-    throw new Error('Unauthorized');
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new ApiError(
+        data.error || 'Request failed',
+        response.status,
+        data.code,
+        data.details
+      );
+    }
+
+    return data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(error.message || 'Network error', 0, 'NETWORK_ERROR');
   }
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || 'Request failed');
-  }
-
-  return response.json();
 }
 
-export const pagesApi = {
-  getTree: (workspaceId) => api(`/pages/tree/${workspaceId}`),
-  get: (id) => api(`/pages/${id}`),
-  create: (data) => api('/pages', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id, data) => api(`/pages/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  delete: (id) => api(`/pages/${id}`, { method: 'DELETE' }),
-  restore: (id) => api(`/pages/${id}/restore`, { method: 'POST' }),
-  duplicate: (id) => api(`/pages/${id}/duplicate`, { method: 'POST' }),
-  move: (id, parentId) => api(`/pages/${id}/move`, { method: 'POST', body: JSON.stringify({ parentId }) }),
-  getHistory: (id) => api(`/pages/${id}/history`),
-  restoreVersion: (id, versionId) => api(`/pages/${id}/history/${versionId}/restore`, { method: 'POST' }),
-};
-
-export const blocksApi = {
-  getPageBlocks: (pageId) => api(`/blocks/page/${pageId}`),
-  create: (data) => api('/blocks', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id, data) => api(`/blocks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  delete: (id) => api(`/blocks/${id}`, { method: 'DELETE' }),
-  reorder: (pageId, blocks) => api('/blocks/reorder', { method: 'POST', body: JSON.stringify({ pageId, blocks }) }),
-};
-
-export const searchApi = {
-  search: (params) => api(`/search?${new URLSearchParams(params)}`),
-  quick: (params) => api(`/search/quick?${new URLSearchParams(params)}`),
-  recent: (params) => api(`/search/recent?${new URLSearchParams(params)}`),
-};
-
-export const tagsApi = {
-  getWorkspaceTags: (workspaceId) => api(`/tags/${workspaceId}`),
-  create: (workspaceId, data) => api(`/tags/${workspaceId}`, { method: 'POST', body: JSON.stringify(data) }),
-  update: (workspaceId, tagId, data) => api(`/tags/${workspaceId}/${tagId}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  delete: (workspaceId, tagId) => api(`/tags/${workspaceId}/${tagId}`, { method: 'DELETE' }),
-  addToPage: (pageId, tagId) => api(`/tags/pages/${pageId}`, { method: 'POST', body: JSON.stringify({ tagId }) }),
-  removeFromPage: (pageId, tagId) => api(`/tags/pages/${pageId}/${tagId}`, { method: 'DELETE' }),
-};
-
-export const commentsApi = {
-  getPageComments: (pageId) => api(`/comments/page/${pageId}`),
-  getBlockComments: (blockId) => api(`/comments/block/${blockId}`),
-  create: (data) => api('/comments', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id, content) => api(`/comments/${id}`, { method: 'PATCH', body: JSON.stringify({ content }) }),
-  delete: (id) => api(`/comments/${id}`, { method: 'DELETE' }),
-  resolve: (id, resolved) => api(`/comments/${id}/resolve`, { method: 'POST', body: JSON.stringify({ resolved }) }),
-};
-
-export const favoritesApi = {
-  get: () => api('/favorites'),
-  add: (pageId) => api('/favorites', { method: 'POST', body: JSON.stringify({ pageId }) }),
-  remove: (pageId) => api(`/favorites/${pageId}`, { method: 'DELETE' }),
-  check: (pageId) => api(`/favorites/check/${pageId}`),
-};
-
-export const uploadApi = {
-  upload: (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    return fetch(`${API_URL}/upload`, {
-      method: 'POST',
-      body: formData,
-      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-      credentials: 'include',
-    }).then(r => r.json());
+export const api = {
+  // Auth
+  auth: {
+    register: (data) => request('/auth/register', { method: 'POST', body: data }),
+    login: (data) => request('/auth/login', { method: 'POST', body: data }),
+    logout: () => request('/auth/logout', { method: 'POST' }),
+    logoutAll: () => request('/auth/logout-all', { method: 'POST' }),
+    me: () => request('/auth/me'),
+    changePassword: (data) => request('/auth/change-password', { method: 'POST', body: data }),
+    updateProfile: (data) => request('/auth/profile', { method: 'PATCH', body: data })
   },
-  uploadMultiple: (files) => {
-    const formData = new FormData();
-    files.forEach(f => formData.append('files', f));
-    return fetch(`${API_URL}/upload/multiple`, {
-      method: 'POST',
-      body: formData,
-      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-      credentials: 'include',
-    }).then(r => r.json());
+
+  // Workspaces
+  workspaces: {
+    list: () => request('/workspaces'),
+    create: (data) => request('/workspaces', { method: 'POST', body: data }),
+    get: (id) => request(`/workspaces/${id}`),
+    update: (id, data) => request(`/workspaces/${id}`, { method: 'PATCH', body: data }),
+    delete: (id) => request(`/workspaces/${id}`, { method: 'DELETE' }),
+    members: {
+      list: (workspaceId) => request(`/workspaces/${workspaceId}/members`),
+      invite: (workspaceId, data) => request(`/workspaces/${workspaceId}/members`, { method: 'POST', body: data }),
+      update: (workspaceId, userId, data) => request(`/workspaces/${workspaceId}/members/${userId}`, { method: 'PATCH', body: data }),
+      remove: (workspaceId, userId) => request(`/workspaces/${workspaceId}/members/${userId}`, { method: 'DELETE' }),
+      leave: (workspaceId) => request(`/workspaces/${workspaceId}/leave`, { method: 'POST' })
+    }
   },
-  delete: (filename) => api(`/upload/${filename}`, { method: 'DELETE' }),
+
+  // Pages
+  pages: {
+    list: (workspaceId) => request(`/pages?workspaceId=${workspaceId}`),
+    get: (id) => request(`/pages/${id}`),
+    create: (data) => request('/pages', { method: 'POST', body: data }),
+    update: (id, data) => request(`/pages/${id}`, { method: 'PATCH', body: data }),
+    delete: (id) => request(`/pages/${id}`, { method: 'DELETE' }),
+    restore: (id) => request(`/pages/${id}/restore`, { method: 'POST' }),
+    duplicate: (id) => request(`/pages/${id}/duplicate`, { method: 'POST' }),
+    reorder: (pageIds) => request('/pages/reorder', { method: 'POST', body: { pageIds } }),
+    publish: (id) => request(`/pages/${id}/publish`, { method: 'POST' }),
+    versions: {
+      list: (pageId) => request(`/pages/${pageId}/versions`),
+      restore: (pageId, versionId) => request(`/pages/${pageId}/versions/${versionId}/restore`, { method: 'POST' })
+    }
+  },
+
+  // Blocks
+  blocks: {
+    list: (pageId) => request(`/blocks/page/${pageId}`),
+    create: (data) => request('/blocks', { method: 'POST', body: data }),
+    update: (id, data) => request(`/blocks/${id}`, { method: 'PATCH', body: data }),
+    delete: (id) => request(`/blocks/${id}`, { method: 'DELETE' }),
+    reorder: (blockIds) => request('/blocks/reorder', { method: 'POST', body: { blockIds } }),
+    duplicate: (id) => request(`/blocks/${id}/duplicate`, { method: 'POST' })
+  },
+
+  // Comments
+  comments: {
+    listByPage: (pageId) => request(`/comments/page/${pageId}`),
+    listByBlock: (blockId) => request(`/comments/block/${blockId}`),
+    create: (data) => request('/comments', { method: 'POST', body: data }),
+    update: (id, data) => request(`/comments/${id}`, { method: 'PATCH', body: data }),
+    resolve: (id) => request(`/comments/${id}/resolve`, { method: 'POST' }),
+    delete: (id) => request(`/comments/${id}`, { method: 'DELETE' })
+  },
+
+  // Tags
+  tags: {
+    list: (workspaceId) => request(`/tags?workspaceId=${workspaceId}`),
+    create: (data) => request('/tags', { method: 'POST', body: data }),
+    update: (id, data) => request(`/tags/${id}`, { method: 'PATCH', body: data }),
+    delete: (id) => request(`/tags/${id}`, { method: 'DELETE' }),
+    addToPage: (pageId, tagId) => request(`/tags/pages/${pageId}/tags`, { method: 'POST', body: { tagId } }),
+    removeFromPage: (pageId, tagId) => request(`/tags/pages/${pageId}/tags/${tagId}`, { method: 'DELETE' }),
+    getForPage: (pageId) => request(`/tags/pages/${pageId}`)
+  },
+
+  // Favorites
+  favorites: {
+    list: () => request('/favorites'),
+    add: (pageId) => request('/favorites', { method: 'POST', body: { pageId } }),
+    remove: (pageId) => request(`/favorites/${pageId}`, { method: 'DELETE' }),
+    check: (pageId) => request(`/favorites/${pageId}/check`)
+  },
+
+  // Search
+  search: {
+    query: (params) => {
+      const searchParams = new URLSearchParams(params);
+      return request(`/search?${searchParams}`);
+    },
+    quick: (params) => {
+      const searchParams = new URLSearchParams(params);
+      return request(`/search/quick?${searchParams}`);
+    },
+    inPage: (pageId, q) => request(`/search/page/${pageId}?q=${encodeURIComponent(q)}`)
+  },
+
+  // Upload
+  upload: {
+    single: (file, workspaceId) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (workspaceId) formData.append('workspaceId', workspaceId);
+      return request('/upload/single', {
+        method: 'POST',
+        body: formData,
+        headers: {} // Let browser set Content-Type with boundary
+      });
+    },
+    multiple: (files, workspaceId) => {
+      const formData = new FormData();
+      files.forEach(file => formData.append('files', file));
+      if (workspaceId) formData.append('workspaceId', workspaceId);
+      return request('/upload/multiple', {
+        method: 'POST',
+        body: formData,
+        headers: {}
+      });
+    },
+    delete: (filename, workspaceId) => {
+      const params = workspaceId ? `?workspaceId=${workspaceId}` : '';
+      return request(`/upload/${filename}${params}`, { method: 'DELETE' });
+    }
+  }
 };
 
-export const workspacesApi = {
-  get: () => api('/workspaces'),
-  getById: (id) => api(`/workspaces/${id}`),
-  create: (data) => api('/workspaces', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id, data) => api(`/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  delete: (id) => api(`/workspaces/${id}`, { method: 'DELETE' }),
-  getMembers: (id) => api(`/workspaces/${id}/members`),
-  inviteMember: (id, data) => api(`/workspaces/${id}/members`, { method: 'POST', body: JSON.stringify(data) }),
-  updateMember: (id, userId, data) => api(`/workspaces/${id}/members/${userId}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  removeMember: (id, userId) => api(`/workspaces/${id}/members/${userId}`, { method: 'DELETE' }),
-};
-
-export const authApi = {
-  login: (username, password) => api('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
-  register: (username, password, name) => api('/auth/register', { method: 'POST', body: JSON.stringify({ username, password, name }) }),
-  me: () => api('/auth/me'),
-  refresh: () => api('/auth/refresh', { method: 'POST' }),
-  updateProfile: (data) => api('/auth/profile', { method: 'PATCH', body: JSON.stringify(data) }),
-  changePassword: (currentPassword, newPassword) => api('/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
-};
+export { ApiError };

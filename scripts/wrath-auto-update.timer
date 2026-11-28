@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Wrath Auto-Update daily at 3 AM
+Requires=wrath-auto-update.service
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

@@ -1,19 +1,40 @@
 import express from 'express';
-import { z } from 'zod';
-import Database from 'better-sqlite3';
-import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { AppError } from '../middleware/errorHandler.js';
+import { z } from 'zod';
+import { getDatabase } from '../db/init.js';
+import { asyncHandler, NotFoundError, ForbiddenError, ValidationError } from '../middleware/errorHandler.js';
 
 const router = express.Router();
-const DATA_DIR = join(process.cwd(), 'data');
-const dbPath = join(DATA_DIR, 'notion-clone.db');
-const db = new Database(dbPath);
 
-// Get user's workspaces
-router.get('/', (req, res) => {
+const createWorkspaceSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).optional(),
+  icon: z.string().max(10).optional()
+});
+
+const updateWorkspaceSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().max(500).optional(),
+  icon: z.string().max(10).optional(),
+  coverUrl: z.string().url().optional().or(z.literal(''))
+});
+
+const inviteMemberSchema = z.object({
+  username: z.string().min(3).max(30),
+  role: z.enum(['viewer', 'member', 'admin']).default('member')
+});
+
+const updateMemberSchema = z.object({
+  role: z.enum(['viewer', 'member', 'admin'])
+});
+
+// Get all workspaces for current user
+router.get('/', asyncHandler(async (req, res) => {
+  const db = getDatabase();
+
   const workspaces = db.prepare(`
-    SELECT w.*, wm.role
+    SELECT w.*, wm.role,
+           (SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) as member_count
     FROM workspaces w
     JOIN workspace_members wm ON w.id = wm.workspace_id
     WHERE wm.user_id = ?
@@ -21,274 +42,252 @@ router.get('/', (req, res) => {
   `).all(req.user.id);
 
   res.json({ workspaces });
-});
-
-// Get single workspace
-router.get('/:id', (req, res, next) => {
-  try {
-    const workspace = db.prepare(`
-      SELECT w.*, wm.role
-      FROM workspaces w
-      JOIN workspace_members wm ON w.id = wm.workspace_id
-      WHERE w.id = ? AND wm.user_id = ?
-    `).get(req.params.id, req.user.id);
-
-    if (!workspace) {
-      throw new AppError('Workspace not found', 404);
-    }
-
-    // Get member count
-    const memberCount = db.prepare('SELECT COUNT(*) as count FROM workspace_members WHERE workspace_id = ?')
-      .get(req.params.id);
-
-    res.json({ workspace: { ...workspace, memberCount: memberCount.count } });
-  } catch (err) {
-    next(err);
-  }
-});
+}));
 
 // Create workspace
-router.post('/', (req, res, next) => {
-  try {
-    const schema = z.object({
-      name: z.string().min(1).max(100),
-      icon: z.string().max(10).optional(),
-      iconColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
-    });
-    const { name, icon = '📝', iconColor = '#0891B2' } = schema.parse(req.body);
+router.post('/', asyncHandler(async (req, res) => {
+  const data = createWorkspaceSchema.parse(req.body);
+  const db = getDatabase();
 
-    const workspaceId = uuidv4();
-    const now = Date.now();
+  const workspaceId = uuidv4();
+  const now = new Date().toISOString();
 
-    db.prepare(`
-      INSERT INTO workspaces (id, name, icon, icon_color, owner_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(workspaceId, name, icon, iconColor, req.user.id, now, now);
+  db.prepare(`
+    INSERT INTO workspaces (id, name, description, icon, owner_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(workspaceId, data.name, data.description || '', data.icon || '📁', req.user.id, now, now);
 
-    db.prepare(`
-      INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(uuidv4(), workspaceId, req.user.id, 'owner', now);
+  db.prepare(`
+    INSERT INTO workspace_members (id, workspace_id, user_id, role, joined_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(uuidv4(), workspaceId, req.user.id, 'owner', now);
 
-    const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(workspaceId);
-    res.status(201).json({ workspace });
-  } catch (err) {
-    next(err);
+  // Create default "Getting Started" page
+  const pageId = uuidv4();
+  const content = JSON.stringify([
+    { id: uuidv4(), type: 'heading1', content: { text: `Welcome to ${data.name}` } },
+    { id: uuidv4(), type: 'paragraph', content: { text: 'Start organizing your thoughts and projects here.' } }
+  ]);
+
+  db.prepare(`
+    INSERT INTO pages (id, workspace_id, title, content, icon, created_by, created_at, updated_at, last_edited_by, last_edited_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(pageId, workspaceId, 'Getting Started', content, '📝', req.user.id, now, now, req.user.id, now);
+
+  const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(workspaceId);
+  res.status(201).json({ workspace });
+}));
+
+// Get workspace details
+router.get('/:workspaceId', asyncHandler(async (req, res) => {
+  const db = getDatabase();
+
+  const workspace = db.prepare(`
+    SELECT w.*, u.username as owner_username, u.display_name as owner_display_name
+    FROM workspaces w
+    JOIN users u ON w.owner_id = u.id
+    WHERE w.id = ?
+  `).get(req.params.workspaceId);
+
+  if (!workspace) {
+    throw new NotFoundError('Workspace not found');
   }
-});
+
+  // Check membership
+  const membership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(req.params.workspaceId, req.user.id);
+
+  if (!membership) {
+    throw new ForbiddenError('Not a member of this workspace');
+  }
+
+  const members = db.prepare(`
+    SELECT wm.*, u.username, u.display_name, u.avatar_url, u.email
+    FROM workspace_members wm
+    JOIN users u ON wm.user_id = u.id
+    WHERE wm.workspace_id = ?
+    ORDER BY wm.joined_at
+  `).all(req.params.workspaceId);
+
+  res.json({ workspace: { ...workspace, role: membership.role }, members });
+}));
 
 // Update workspace
-router.patch('/:id', (req, res, next) => {
-  try {
-    const schema = z.object({
-      name: z.string().min(1).max(100).optional(),
-      icon: z.string().max(10).optional(),
-      iconColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
-    });
-    const data = schema.parse(req.body);
+router.patch('/:workspaceId', asyncHandler(async (req, res) => {
+  const data = updateWorkspaceSchema.parse(req.body);
+  const db = getDatabase();
 
-    // Check ownership
-    const membership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
-      .get(req.params.id, req.user.id);
+  const membership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(req.params.workspaceId, req.user.id);
 
-    if (!membership || membership.role !== 'owner') {
-      throw new AppError('Only workspace owner can update', 403);
-    }
+  if (!membership || !['owner', 'admin'].includes(membership.role)) {
+    throw new ForbiddenError('Insufficient permissions');
+  }
 
-    const updates = [];
-    const params = [];
-    if (data.name !== undefined) {
-      updates.push('name = ?');
-      params.push(data.name);
-    }
-    if (data.icon !== undefined) {
-      updates.push('icon = ?');
-      params.push(data.icon);
-    }
-    if (data.iconColor !== undefined) {
-      updates.push('icon_color = ?');
-      params.push(data.iconColor);
-    }
-    if (updates.length === 0) {
-      const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.id);
-      return res.json({ workspace });
-    }
+  const updates = [];
+  const params = [];
 
+  if (data.name !== undefined) { updates.push('name = ?'); params.push(data.name); }
+  if (data.description !== undefined) { updates.push('description = ?'); params.push(data.description); }
+  if (data.icon !== undefined) { updates.push('icon = ?'); params.push(data.icon); }
+  if (data.coverUrl !== undefined) { updates.push('cover_url = ?'); params.push(data.coverUrl || null); }
+
+  if (updates.length > 0) {
     updates.push('updated_at = ?');
-    params.push(Date.now());
-    params.push(req.params.id);
+    params.push(new Date().toISOString());
+    params.push(req.params.workspaceId);
 
     db.prepare(`UPDATE workspaces SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-
-    const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.id);
-    res.json({ workspace });
-  } catch (err) {
-    next(err);
   }
-});
+
+  const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.workspaceId);
+  res.json({ workspace });
+}));
 
 // Delete workspace
-router.delete('/:id', (req, res, next) => {
-  try {
-    // Check ownership
-    const membership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
-      .get(req.params.id, req.user.id);
+router.delete('/:workspaceId', asyncHandler(async (req, res) => {
+  const db = getDatabase();
 
-    if (!membership || membership.role !== 'owner') {
-      throw new AppError('Only workspace owner can delete', 403);
-    }
-
-    db.prepare('DELETE FROM workspaces WHERE id = ?').run(req.params.id);
-    res.json({ message: 'Workspace deleted' });
-  } catch (err) {
-    next(err);
+  const workspace = db.prepare('SELECT owner_id FROM workspaces WHERE id = ?').get(req.params.workspaceId);
+  if (!workspace) {
+    throw new NotFoundError('Workspace not found');
   }
-});
 
-// Get workspace members
-router.get('/:id/members', (req, res, next) => {
-  try {
-    const members = db.prepare(`
-      SELECT wm.*, u.email, u.name, u.avatar_url
-      FROM workspace_members wm
-      JOIN users u ON wm.user_id = u.id
-      WHERE wm.workspace_id = ?
-      ORDER BY wm.created_at
-    `).all(req.params.id);
-
-    res.json({ members });
-  } catch (err) {
-    next(err);
+  if (workspace.owner_id !== req.user.id) {
+    throw new ForbiddenError('Only the owner can delete the workspace');
   }
-});
+
+  db.prepare('DELETE FROM workspaces WHERE id = ?').run(req.params.workspaceId);
+  res.json({ message: 'Workspace deleted' });
+}));
 
 // Invite member
-router.post('/:id/members', (req, res, next) => {
-  try {
-    const schema = z.object({
-      email: z.string().email(),
-      role: z.enum(['admin', 'member']).default('member'),
-    });
-    const { email, role } = schema.parse(req.body);
+router.post('/:workspaceId/members', asyncHandler(async (req, res) => {
+  const data = inviteMemberSchema.parse(req.body);
+  const db = getDatabase();
 
-    // Check permission
-    const membership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
-      .get(req.params.id, req.user.id);
+  const membership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(req.params.workspaceId, req.user.id);
 
-    if (!membership || !['owner', 'admin'].includes(membership.role)) {
-      throw new AppError('Insufficient permissions', 403);
-    }
-
-    const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (!user) {
-      throw new AppError('User not found', 404);
-    }
-
-    // Check if already member
-    const existing = db.prepare('SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
-      .get(req.params.id, user.id);
-
-    if (existing) {
-      throw new AppError('User is already a member', 409);
-    }
-
-    db.prepare(`
-      INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(uuidv4(), req.params.id, user.id, role, Date.now());
-
-    const member = db.prepare(`
-      SELECT wm.*, u.email, u.name, u.avatar_url
-      FROM workspace_members wm
-      JOIN users u ON wm.user_id = u.id
-      WHERE wm.workspace_id = ? AND wm.user_id = ?
-    `).get(req.params.id, user.id);
-
-    res.status(201).json({ member });
-  } catch (err) {
-    next(err);
+  if (!membership || !['owner', 'admin'].includes(membership.role)) {
+    throw new ForbiddenError('Insufficient permissions');
   }
-});
+
+  const user = db.prepare('SELECT id FROM users WHERE username = ?').get(data.username);
+  if (!user) {
+    throw new NotFoundError('User not found');
+  }
+
+  const existing = db.prepare('SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(req.params.workspaceId, user.id);
+
+  if (existing) {
+    throw new ValidationError('User is already a member');
+  }
+
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO workspace_members (id, workspace_id, user_id, role, joined_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(uuidv4(), req.params.workspaceId, user.id, data.role, now);
+
+  const member = db.prepare(`
+    SELECT wm.*, u.username, u.display_name, u.avatar_url, u.email
+    FROM workspace_members wm
+    JOIN users u ON wm.user_id = u.id
+    WHERE wm.workspace_id = ? AND wm.user_id = ?
+  `).get(req.params.workspaceId, user.id);
+
+  res.status(201).json({ member });
+}));
 
 // Update member role
-router.patch('/:id/members/:userId', (req, res, next) => {
-  try {
-    const schema = z.object({
-      role: z.enum(['admin', 'member']),
-    });
-    const { role } = schema.parse(req.body);
+router.patch('/:workspaceId/members/:userId', asyncHandler(async (req, res) => {
+  const data = updateMemberSchema.parse(req.body);
+  const db = getDatabase();
 
-    // Check permission
-    const membership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
-      .get(req.params.id, req.user.id);
+  const membership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(req.params.workspaceId, req.user.id);
 
-    if (!membership || membership.role !== 'owner') {
-      throw new AppError('Only workspace owner can change roles', 403);
-    }
-
-    // Can't change owner's role
-    const targetMembership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
-      .get(req.params.id, req.params.userId);
-
-    if (!targetMembership) {
-      throw new AppError('Member not found', 404);
-    }
-
-    if (targetMembership.role === 'owner') {
-      throw new AppError('Cannot change owner role', 400);
-    }
-
-    db.prepare('UPDATE workspace_members SET role = ? WHERE workspace_id = ? AND user_id = ?')
-      .run(role, req.params.id, req.params.userId);
-
-    const member = db.prepare(`
-      SELECT wm.*, u.email, u.name, u.avatar_url
-      FROM workspace_members wm
-      JOIN users u ON wm.user_id = u.id
-      WHERE wm.workspace_id = ? AND wm.user_id = ?
-    `).get(req.params.id, req.params.userId);
-
-    res.json({ member });
-  } catch (err) {
-    next(err);
+  if (!membership || membership.role !== 'owner') {
+    throw new ForbiddenError('Only owner can change roles');
   }
-});
+
+  const targetMember = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(req.params.workspaceId, req.params.userId);
+
+  if (!targetMember) {
+    throw new NotFoundError('Member not found');
+  }
+
+  if (targetMember.role === 'owner') {
+    throw new ForbiddenError('Cannot change owner role');
+  }
+
+  db.prepare('UPDATE workspace_members SET role = ? WHERE workspace_id = ? AND user_id = ?')
+    .run(data.role, req.params.workspaceId, req.params.userId);
+
+  const member = db.prepare(`
+    SELECT wm.*, u.username, u.display_name, u.avatar_url, u.email
+    FROM workspace_members wm
+    JOIN users u ON wm.user_id = u.id
+    WHERE wm.workspace_id = ? AND wm.user_id = ?
+  `).get(req.params.workspaceId, req.params.userId);
+
+  res.json({ member });
+}));
 
 // Remove member
-router.delete('/:id/members/:userId', (req, res, next) => {
-  try {
-    // Check permission
-    const membership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
-      .get(req.params.id, req.user.id);
+router.delete('/:workspaceId/members/:userId', asyncHandler(async (req, res) => {
+  const db = getDatabase();
 
-    const targetMembership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
-      .get(req.params.id, req.params.userId);
+  const membership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(req.params.workspaceId, req.user.id);
 
-    if (!targetMembership) {
-      throw new AppError('Member not found', 404);
-    }
+  const targetMember = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(req.params.workspaceId, req.params.userId);
 
-    // Can't remove owner
-    if (targetMembership.role === 'owner') {
-      throw new AppError('Cannot remove workspace owner', 400);
-    }
-
-    // Only owner/admin can remove, or user can remove themselves
-    const canRemove = membership.role === 'owner' ||
-      (membership.role === 'admin' && targetMembership.role === 'member') ||
-      req.user.id === req.params.userId;
-
-    if (!canRemove) {
-      throw new AppError('Insufficient permissions', 403);
-    }
-
-    db.prepare('DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
-      .run(req.params.id, req.params.userId);
-
-    res.json({ message: 'Member removed' });
-  } catch (err) {
-    next(err);
+  if (!targetMember) {
+    throw new NotFoundError('Member not found');
   }
-});
+
+  // Users can remove themselves, owners/admins can remove others
+  const isSelf = req.params.userId === req.user.id;
+  const canManage = membership && ['owner', 'admin'].includes(membership.role);
+
+  if (!isSelf && !canManage) {
+    throw new ForbiddenError('Insufficient permissions');
+  }
+
+  if (targetMember.role === 'owner') {
+    throw new ForbiddenError('Cannot remove owner');
+  }
+
+  db.prepare('DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .run(req.params.workspaceId, req.params.userId);
+
+  res.json({ message: 'Member removed' });
+}));
+
+// Leave workspace
+router.post('/:workspaceId/leave', asyncHandler(async (req, res) => {
+  const db = getDatabase();
+
+  const membership = db.prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(req.params.workspaceId, req.user.id);
+
+  if (!membership) {
+    throw new NotFoundError('Not a member of this workspace');
+  }
+
+  if (membership.role === 'owner') {
+    throw new ForbiddenError('Owner cannot leave. Transfer ownership or delete workspace.');
+  }
+
+  db.prepare('DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .run(req.params.workspaceId, req.user.id);
+
+  res.json({ message: 'Left workspace' });
+}));
 
 export default router;

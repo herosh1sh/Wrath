@@ -1,570 +1,290 @@
-import { useState, useEffect, useRef } from 'react';
-import { ChevronRight, ChevronDown, Tag, Star, Clock, Share2, Link as LinkIcon, Download, Trash2, MoreVertical, X, Plus, Search, Settings, HelpCircle, Info, FileText, Users, Bell, Key, Shield, Palette, Moon, Sun, Monitor, Globe, Lock, Unlock, Eye, Edit, Comment, Copy, Check, AlertCircle } from 'lucide-react';
-import { useWorkspace } from '../contexts/WorkspaceContext';
-import { useAuth } from '../contexts/AuthContext';
-import { api, pagesApi, tagsApi, commentsApi } from '../lib/api';
-import { Dropdown, DropdownItem, DropdownSeparator, DropdownLabel } from './ui/Dropdown';
-import { Modal, ModalContent, ModalFooter, ModalTitle, ModalDescription } from './ui/Modal';
+import { useState, useEffect } from 'react';
+import { cn } from '../lib/utils';
+import { ChevronRight, ChevronDown, MessageSquare, Share2, Star, Tag, Archive, Clock, User, MoreHorizontal, X } from 'lucide-react';
 import { Button } from './ui/Button';
-import { Input } from './ui/Input';
-import { Badge } from './ui/Badge';
 import { Avatar } from './ui/Avatar';
-import Tooltip from './ui/Tooltip';
+import { Badge } from './ui/Badge';
+import { Dropdown } from './ui/Dropdown';
+import { Tooltip } from './ui/Tooltip';
+import { Modal } from './ui/Modal';
+import { api } from '../lib/api';
+import { useToast } from './ui/Toaster';
+import { formatRelativeTime } from '../lib/utils';
 
-const ICONS = ['📝', '🛡️', '🏹', '⚡', '🔥', '💀', '👑', '🏰', '⚖️', '🗝️', '📜', '📋', '📚', '📖', '📔', '📕', '📗', '📘', '📙', '🗂️', '🗃️', '🗄️', '📁', '📂', '🗒️', '🗓️', '📅', '📆', '📇', '🏠', '🏢', '🏭', '🏫', '🏪', '🏬', '⚙️', '🔧', '🔨', '🔋', '💡', '🔍', '🔎', '🔑', '🎯', '🎨', '🎭', '🎪', '🎫', '🎬', '🎮', '🕹️', '🎲', '♟️', '🌟', '⭐', '💫', '✨', '🌙', '☀️', '☁️', '⛈️', '🌈', '🚀', '🛸', '🛩️', '✈️', '🚁', '🚂', '⛵'];
-
-export default function PageSidebar({ page, workspaceId, onClose }) {
-  const { currentWorkspace } = useWorkspace();
-  const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('properties');
-  const [tags, setTags] = useState([]);
-  const [workspaceTags, setWorkspaceTags] = useState([]);
-  const [showTagInput, setShowTagInput] = useState(false);
-  const [newTagName, setNewTagName] = useState('');
-  const [newTagColor, setNewTagColor] = useState('#0891B2');
-  const [showShareModal, setShowShareModal] = useState(false);
+export function PageSidebar({ page, workspaceId }) {
+  const { toast } = useToast();
+  const [showComments, setShowComments] = useState(false);
+  const [showProperties, setShowProperties] = useState(true);
+  const [showActivity, setShowActivity] = useState(false);
   const [comments, setComments] = useState([]);
-  const [showCommentInput, setShowCommentInput] = useState(false);
-  const [commentText, setCommentText] = useState('');
-  const [showIconPicker, setShowIconPicker] = useState(false);
-  const [pageIcon, setPageIcon] = useState(page.icon || '📝');
-  const [pageIconColor, setPageIconColor] = useState(page.iconColor || '#DC2626');
-  const [pageCover, setPageCover] = useState(page.coverUrl || '');
-  const [pageCoverPosition, setPageCoverPosition] = useState(page.coverPosition || 0.5);
-  const [loading, setLoading] = useState(false);
-  const [properties, setProperties] = useState(page.properties || {});
+  const [activities, setActivities] = useState([]);
+  const [newComment, setNewComment] = useState('');
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [submittingComment, setSubmittingComment] = useState(false);
 
-  const COLORS = ['#0891B2', '#059669', '#D97706', '#DC2626', '#7C3AED', '#DB2777', '#0D9488', '#CA8A04', '#65A30D', '#2563EB', '#9333EA', '#EC4899'];
-
-  // Fetch tags
   useEffect(() => {
-    const fetchTags = async () => {
-      try {
-        const [pageTagsData, wsTagsData] = await Promise.all([
-          api(`/tags/pages/${page.id}`),
-          tagsApi.getWorkspaceTags(workspaceId),
-        ]);
-        setTags(pageTagsData.tags || []);
-        setWorkspaceTags(wsTagsData.tags || []);
-      } catch (err) {
-        console.error('Failed to fetch tags:', err);
-      }
-    };
-    fetchTags();
-  }, [page.id, workspaceId]);
+    if (page) {
+      fetchComments();
+      fetchActivity();
+    }
+  }, [page?.id]);
 
-  // Fetch comments
-  useEffect(() => {
-    const fetchComments = async () => {
-      try {
-        const data = await commentsApi.getPageComments(page.id);
-        setComments(data.comments || []);
-      } catch (err) {
-        console.error('Failed to fetch comments:', err);
-      }
-    };
-    fetchComments();
-  }, [page.id]);
-
-  // Handle tag toggle
-  const handleTagToggle = async (tag) => {
+  const fetchComments = async () => {
+    if (!page?.id) return;
+    setLoadingComments(true);
     try {
-      const isTagged = tags.some(t => t.id === tag.id);
-      if (isTagged) {
-        await tagsApi.removeFromPage(page.id, tag.id);
-        setTags(prev => prev.filter(t => t.id !== tag.id));
-      } else {
-        await tagsApi.addToPage(page.id, tag.id);
-        setTags(prev => [...prev, tag]);
-      }
-    } catch (err) {
-      console.error('Failed to toggle tag:', err);
+      const data = await api.comments.listByPage(page.id);
+      setComments(data.comments || []);
+    } catch (error) {
+      console.error('Failed to fetch comments:', error);
+    } finally {
+      setLoadingComments(false);
     }
   };
 
-  // Create new tag
-  const handleCreateTag = async (e) => {
+  const fetchActivity = async () => {
+    if (!page?.id || !workspaceId) return;
+    try {
+      const data = await api.pages.get(page.id);
+      // In a real app, you'd have an activity endpoint
+      setActivities([]);
+    } catch (error) {
+      console.error('Failed to fetch activity:', error);
+    }
+  };
+
+  const handleAddComment = async (e) => {
     e.preventDefault();
-    if (!newTagName.trim()) return;
+    if (!newComment.trim() || !page?.id) return;
 
+    setSubmittingComment(true);
     try {
-      const data = await tagsApi.create(workspaceId, { name: newTagName.trim(), color: newTagColor });
-      await tagsApi.addToPage(page.id, data.tag.id);
-      setTags(prev => [...prev, data.tag]);
-      setWorkspaceTags(prev => [...prev, data.tag]);
-      setShowTagInput(false);
-      setNewTagName('');
-    } catch (err) {
-      console.error('Failed to create tag:', err);
+      const data = await api.comments.create({
+        pageId: page.id,
+        content: newComment.trim()
+      });
+      setComments(prev => [...prev, data.comment]);
+      setNewComment('');
+      toast.success('Comment added');
+    } catch (error) {
+      toast.error('Error', 'Failed to add comment');
+    } finally {
+      setSubmittingComment(false);
     }
   };
 
-  // Handle property change
-  const handlePropertyChange = (key, value) => {
-    const newProps = { ...properties, [key]: value };
-    setProperties(newProps);
-    // Could add debounced save here
+  const handleResolveComment = async (commentId, resolved) => {
+    try {
+      await api.comments.resolve(commentId);
+      setComments(prev => prev.map(c =>
+        c.id === commentId ? { ...c, resolved: !resolved } : c
+      ));
+    } catch (error) {
+      toast.error('Error', 'Failed to update comment');
+    }
   };
 
-  // Add property
-  const handleAddProperty = () => {
-    const key = `property_${Date.now()}`;
-    setProperties(prev => ({ ...prev, [key]: '' }));
+  const handleDeleteComment = async (commentId) => {
+    if (!confirm('Delete this comment?')) return;
+    try {
+      await api.comments.delete(commentId);
+      setComments(prev => prev.filter(c => c.id !== commentId));
+      toast.success('Comment deleted');
+    } catch (error) {
+      toast.error('Error', 'Failed to delete comment');
+    }
   };
 
-  // Remove property
-  const handleRemoveProperty = (key) => {
-    setProperties(prev => {
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-  };
+  const commentMenuItems = (comment) => [
+    { label: resolved ? 'Unresolve' : 'Resolve', icon: resolved ? <X className="w-4 h-4" /> : <Check className="w-4 h-4" />, onClick: () => handleResolveComment(comment.id, comment.resolved), shortcut: '' },
+    { type: 'divider' },
+    { label: 'Delete', icon: <Trash2 className="w-4 h-4" />, onClick: () => handleDeleteComment(comment.id), shortcut: '', className: 'text-error' }
+  ];
 
-  // Handle share
-  const handleShare = () => setShowShareModal(true);
-
-  // Format date
-  const formatDate = (timestamp) => {
-    if (!timestamp) return '';
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now - date;
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-
-    if (days === 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    if (days === 1) return 'Вчера';
-    if (days < 7) return date.toLocaleDateString([], { weekday: 'short' });
-    if (days < 365) return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-  };
+  const { Check, Trash2 } = require('lucide-react');
 
   if (!page) return null;
 
   return (
-    <aside className="w-80 border-l border-border bg-surface flex flex-col">
-      {/* Tab bar */}
-      <div className="border-b border-border">
-        <nav className="flex" role="tablist">
-          {[
-            { id: 'properties', label: 'Свойства', icon: Info },
-            { id: 'comments', label: 'Комментарии', icon: Comment },
-            { id: 'sharing', label: 'Доступ', icon: Share2 },
-          ].map(tab => (
+    <aside className="w-80 bg-background-secondary border-l border-border-light flex flex-col">
+      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+        {/* Properties */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-medium text-foreground-primary">Properties</h3>
             <button
-              key={tab.id}
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === tab.id
-                  ? 'border-accent text-accent'
-                  : 'border-transparent text-foreground-muted hover:text-foreground hover:bg-muted'
-              }`}
+              onClick={() => setShowProperties(!showProperties)}
+              className="p-1 rounded hover:bg-background-hover text-foreground-tertiary"
+              aria-label={showProperties ? 'Collapse' : 'Expand'}
             >
-              <tab.icon className="h-4 w-4" />
-              <span>{tab.label}</span>
+              <ChevronRight className={cn('w-4 h-4 transition-transform', showProperties && 'rotate-90')} />
             </button>
-          ))}
-        </nav>
-      </div>
-
-      {/* Tab content */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {/* Properties tab */}
-        {activeTab === 'properties' && (
-          <div className="space-y-6">
-            {/* Page icon & cover */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-4">
-                <div className="relative">
-                  <button
-                    onClick={() => setShowIconPicker(true)}
-                    className="flex items-center justify-center w-14 h-14 rounded-lg bg-muted text-3xl hover:bg-muted-foreground/10 transition-colors"
-                    aria-label="Сменить иконку"
-                  >
-                    {pageIcon}
-                  </button>
-                  {showIconPicker && (
-                    <div className="absolute left-0 top-full mt-2 z-50 w-72 bg-surface border border-border rounded-lg shadow-xl p-3 animate-in">
-                      <div className="mb-3">
-                        <label className="block text-sm font-medium mb-2">Цвет иконки</label>
-                        <div className="flex flex-wrap gap-1">
-                          {COLORS.map(color => (
-                            <button
-                              key={color}
-                              onClick={() => setPageIconColor(color)}
-                              className={`w-7 h-7 rounded transition-colors ${
-                                pageIconColor === color ? 'ring-2 ring-accent ring-offset-2 scale-110' : 'hover:ring-1 ring-border'
-                              }`}
-                              style={{ backgroundColor: color }}
-                              aria-label={`Цвет ${color}`}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                      <DropdownSeparator />
-                      <div className="grid grid-cols-7 gap-1 max-h-56 overflow-auto">
-                        {ICONS.map(icon => (
-                          <button
-                            key={icon}
-                            onClick={() => { setPageIcon(icon); setShowIconPicker(false); }}
-                            className={`p-1.5 text-xl rounded transition-colors hover:bg-muted ${
-                              pageIcon === icon ? 'bg-muted ring-2 ring-accent' : ''
-                            }`}
-                            aria-label={`Иконка ${icon}`}
-                          >
-                            {icon}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <Input
-                    value={page.title}
-                    onChange={(e) => handlePropertyChange('title', e.target.value)}
-                    placeholder="Без названия"
-                    className="text-lg font-semibold bg-transparent border-none focus:ring-0 placeholder:text-foreground-muted"
-                  />
-                </div>
-              </div>
-
-              {pageCover && (
-                <div className="relative h-32 w-full rounded-lg overflow-hidden">
-                  <img
-                    src={pageCover}
-                    alt="Обложка страницы"
-                    className="w-full h-full object-cover"
-                    style={{ transform: `translateY(${pageCoverPosition * 20}%)` }}
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-background/60 via-transparent to-transparent" />
-                </div>
-              )}
-            </div>
-
-            {/* Properties */}
-            <div>
-              <h3 className="text-sm font-semibold text-foreground-muted uppercase tracking-wide mb-3">Свойства</h3>
-              <div className="space-y-2">
-                {Object.entries(properties).map(([key, value]) => (
-                  <div key={key} className="flex items-center gap-2">
-                    <Input
-                      value={key}
-                      onChange={(e) => {
-                        if (e.target.value !== key) {
-                          handleRemoveProperty(key);
-                          handlePropertyChange(e.target.value, value);
-                        }
-                      }}
-                      placeholder="Имя свойства"
-                      className="flex-1 text-sm"
-                    />
-                    <Input
-                      value={value}
-                      onChange={(e) => handlePropertyChange(key, e.target.value)}
-                      placeholder="Значение"
-                      className="flex-1 text-sm"
-                    />
-                    <Tooltip content="Удалить свойство" position="top">
-                      <button
-                        onClick={() => handleRemoveProperty(key)}
-                        className="btn-icon p-1.5 text-foreground-muted hover:text-foreground hover:bg-muted rounded"
-                        aria-label="Удалить свойство"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </Tooltip>
-                  </div>
-                ))}
-                <button
-                  onClick={handleAddProperty}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-foreground-muted rounded-sm hover:bg-muted hover:text-foreground transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  Добавить свойство
-                </button>
-              </div>
-            </div>
-
-            {/* Tags */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-foreground-muted uppercase tracking-wide">Теги</h3>
-                <button
-                  onClick={() => setShowTagInput(true)}
-                  className="btn-icon p-1.5 text-foreground-muted hover:bg-muted rounded"
-                  aria-label="Добавить тег"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
-
-              {showTagInput && (
-                <form onSubmit={handleCreateTag} className="space-y-2 mb-3">
-                  <div className="flex gap-2">
-                    <Input
-                      value={newTagName}
-                      onChange={(e) => setNewTagName(e.target.value)}
-                      placeholder="Имя тега"
-                      className="flex-1"
-                      autoFocus
-                    />
-                    <select
-                      value={newTagColor}
-                      onChange={(e) => setNewTagColor(e.target.value)}
-                      className="input w-24"
-                    >
-                      {COLORS.map(color => (
-                        <option key={color} value={color} style={{ backgroundColor: color }}>
-                          {color}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="ghost" type="button" onClick={() => { setShowTagInput(false); setNewTagName(''); }}>
-                      Отмена
-                    </Button>
-                    <Button type="submit" disabled={!newTagName.trim()}>Создать</Button>
-                  </div>
-                </form>
-              )}
-
-              {workspaceTags.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {workspaceTags.map(tag => (
-                    <Tooltip key={tag.id} content={tag.name} position="top">
-                      <button
-                        onClick={() => handleTagToggle(tag)}
-                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                          tags.some(t => t.id === tag.id)
-                            ? 'bg-opacity-20 ring-2 ring-offset-2'
-                            : 'bg-opacity-10 hover:bg-opacity-20'
-                        }`}
-                        style={{
-                          backgroundColor: `${tag.color}1A`,
-                          borderColor: tag.color,
-                          color: tag.color,
-                        }}
-                        aria-label={tags.some(t => t.id === tag.id) ? `Удалить тег ${tag.name}` : `Добавить тег ${tag.name}`}
-                      >
-                        {tags.some(t => t.id === tag.id) && <Check className="h-3 w-3" />}
-                        <span>{tag.name}</span>
-                      </button>
-                    </Tooltip>
-                  ))}
-                </div>
-              )}
-
-              {workspaceTags.length === 0 && !showTagInput && (
-                <p className="text-sm text-foreground-muted">В этом рабочем пространстве нет тегов. Создайте один, чтобы начать.</p>
-              )}
-            </div>
-
-            {/* Page info */}
-            <div className="pt-4 border-t border-border space-y-2 text-sm text-foreground-muted">
-              <div className="flex items-center gap-2">
-                <Info className="h-4 w-4 flex-shrink-0" />
-                <span>Создана {formatDate(page.created_at)}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 flex-shrink-0" />
-                <span>Изменена {formatDate(page.updated_at)}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 flex-shrink-0" />
-                <span>ID страницы: {page.id.slice(0, 8)}...</span>
-              </div>
-            </div>
           </div>
-        )}
 
-        {/* Comments tab */}
-        {activeTab === 'comments' && (
-          <div className="space-y-4">
-            {comments.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center text-foreground-muted">
-                <Comment className="h-10 w-10 opacity-50 mb-3" />
-                <p>Комментариев пока нет</p>
-                <p className="text-sm">Начните обсуждение на этой странице</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {comments.map(comment => (
-                  <div key={comment.id} className="flex gap-3">
-                    <Avatar src={comment.author_avatar} fallback={comment.author_name?.charAt(0)} size="sm" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium text-sm">{comment.author_name}</span>
-                        <span className="text-xs text-foreground-muted">{formatDate(comment.created_at)}</span>
-                        {comment.resolved && (
-                          <Badge variant="success" className="text-xs">Решено</Badge>
-                        )}
-                      </div>
-                      <p className="text-sm text-foreground">{comment.content}</p>
-                      <div className="flex items-center gap-2 mt-2">
-                        {comment.user_id === user?.id && (
-                          <>
-                            <button className="text-xs text-foreground-muted hover:text-foreground transition-colors">Редактировать</button>
-                            <button className="text-xs text-foreground-muted hover:text-foreground transition-colors">Удалить</button>
-                          </>
-                        )}
-                        {!comment.resolved && (
-                          <button className="text-xs text-accent hover:text-accent-hover transition-colors">Отметить как решено</button>
-                        )}
-                        {comment.resolved && (
-                          <button className="text-xs text-foreground-muted hover:text-foreground transition-colors">Открыть снова</button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Add comment */}
-            <div className="border-t border-border pt-4">
-              {showCommentInput ? (
-                <div className="flex gap-3">
-                  <Avatar src={user?.avatar_url} fallback={user?.name?.charAt(0)} size="sm" />
-                  <div className="flex-1 space-y-2">
-                    <textarea
-                      value={commentText}
-                      onChange={(e) => setCommentText(e.target.value)}
-                      placeholder="Напишите комментарий..."
-                      className="textarea min-h-[80px]"
-                      rows={3}
-                    />
-                    <div className="flex justify-end gap-2">
-                      <Button variant="ghost" onClick={() => { setShowCommentInput(false); setCommentText(''); }}>
-                        Отмена
-                      </Button>
-                      <Button onClick={async () => {
-                        if (!commentText.trim()) return;
-                        try {
-                          await commentsApi.create({ pageId: page.id, content: commentText });
-                          setCommentText('');
-                          setShowCommentInput(false);
-                        } catch (err) {
-                          console.error('Failed to add comment:', err);
-                        }
-                      }} disabled={!commentText.trim()}>
-                        Комментировать
-                      </Button>
-                    </div>
-                  </div>
+          {showProperties && (
+            <div className="space-y-3">
+              <PropertyRow label="Created by">
+                <div className="flex items-center gap-2">
+                  <Avatar size="sm" name={page.created_by_display_name} src={page.created_by_avatar} />
+                  <span className="text-sm text-foreground-primary">{page.created_by_display_name || page.created_by_username}</span>
                 </div>
-              ) : (
-                <button
-                  onClick={() => setShowCommentInput(true)}
-                  className="w-full flex items-center gap-3 px-3 py-3 text-foreground-muted rounded-sm hover:bg-muted hover:text-foreground transition-colors"
-                >
-                  <Avatar src={user?.avatar_url} fallback={user?.name?.charAt(0)} size="sm" />
-                  <span className="text-sm">Добавить комментарий...</span>
-                </button>
+              </PropertyRow>
+
+              <PropertyRow label="Created">
+                <span className="text-sm text-foreground-secondary">{formatRelativeTime(page.created_at)}</span>
+              </PropertyRow>
+
+              <PropertyRow label="Last edited">
+                <div className="flex items-center gap-2">
+                  <Avatar size="sm" name={page.last_edited_by_display_name} src={page.last_edited_by_avatar} />
+                  <span className="text-sm text-foreground-secondary">{formatRelativeTime(page.last_edited_at)}</span>
+                </div>
+              </PropertyRow>
+
+              {page.is_published && (
+                <PropertyRow label="Published">
+                  <Badge variant="success">Public</Badge>
+                </PropertyRow>
               )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Sharing tab */}
-        {activeTab === 'sharing' && (
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground-muted uppercase tracking-wide mb-3">Ссылка для доступа</h3>
-              <div className="flex gap-2">
-                <Input
-                  value={`${window.location.origin}/workspace/${page.id}`}
-                  readOnly
-                  className="flex-1"
+        {/* Comments */}
+        <div className="space-y-4 border-t border-border-light pt-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-medium text-foreground-primary flex items-center gap-2">
+              <MessageSquare className="w-5 h-5" />
+              Comments
+              {comments.length > 0 && (
+                <Badge variant="outline">{comments.length}</Badge>
+              )}
+            </h3>
+            <button
+              onClick={() => setShowComments(!showComments)}
+              className="p-1 rounded hover:bg-background-hover text-foreground-tertiary"
+              aria-label={showComments ? 'Collapse' : 'Expand'}
+            >
+              <ChevronRight className={cn('w-4 h-4 transition-transform', showComments && 'rotate-90')} />
+            </button>
+          </div>
+
+          {showComments && (
+            <div className="space-y-4 mt-4">
+              {comments.map(comment => (
+                <CommentItem
+                  key={comment.id}
+                  comment={comment}
+                  onResolve={handleResolveComment}
+                  onDelete={handleDeleteComment}
+                  currentUserId={page.last_edited_by} // In real app, use auth user
                 />
-                <Button variant="outline" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/workspace/${page.id}`)}>
-                  Копировать
-                </Button>
-              </div>
-              <p className="text-sm text-foreground-muted mt-2">Любой человек с этой ссылкой может просматривать эту страницу.</p>
-            </div>
+              ))}
 
-            <DropdownSeparator />
-
-            <div>
-              <h3 className="text-sm font-semibold text-foreground-muted uppercase tracking-wide mb-3">Права доступа</h3>
-              <div className="space-y-3">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="radio" name="permission" defaultChecked className="sr-only" />
-                  <div className="flex items-center justify-between w-full p-3 rounded-sm border border-border bg-surface hover:bg-muted transition-colors">
-                    <div className="flex items-center gap-3">
-                      <Globe className="h-5 w-5 text-foreground-muted" />
-                      <div>
-                        <p className="font-medium text-sm">Все, у кого есть ссылка</p>
-                        <p className="text-xs text-foreground-muted">Публичный доступ — вход не требуется</p>
-                      </div>
-                    </div>
-                    <Badge variant="primary">Может просматривать</Badge>
-                  </div>
-                </label>
-
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="radio" name="permission" className="sr-only" />
-                  <div className="flex items-center justify-between w-full p-3 rounded-sm border border-border bg-surface hover:bg-muted transition-colors">
-                    <div className="flex items-center gap-3">
-                      <Lock className="h-5 w-5 text-foreground-muted" />
-                      <div>
-                        <p className="font-medium text-sm">Участники рабочего пространства</p>
-                        <p className="text-xs text-foreground-muted">Только участники этого рабочего пространства</p>
-                      </div>
-                    </div>
-                    <select className="input w-32 text-sm py-1">
-                      <option value="view">Может просматривать</option>
-                      <option value="comment">Может комментировать</option>
-                      <option value="edit">Может редактировать</option>
-                    </select>
-                  </div>
-                </label>
-
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="radio" name="permission" className="sr-only" />
-                  <div className="flex items-center justify-between w-full p-3 rounded-sm border border-border bg-surface hover:bg-muted transition-colors">
-                    <div className="flex items-center gap-3">
-                      <Users className="h-5 w-5 text-foreground-muted" />
-                      <div>
-                        <p className="font-medium text-sm">Приглашённые люди</p>
-                        <p className="text-xs text-foreground-muted">Конкретные люди, которых вы пригласили</p>
-                      </div>
-                    </div>
-                    <Button variant="outline" size="sm">
-                      <Plus className="h-3.5 w-3.5" />
-                      Пригласить
+              {/* Add comment form */}
+              <form onSubmit={handleAddComment} className="flex gap-2">
+                <Avatar size="sm" name="You" />
+                <div className="flex-1 flex flex-col gap-2">
+                  <textarea
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    placeholder="Add a comment..."
+                    rows={2}
+                    className="px-3 py-2 text-sm bg-background-tertiary border border-border-light rounded-lg focus:border-border-focus focus:ring-2 focus:ring-primary-light resize-none"
+                  />
+                  <div className="flex justify-end">
+                    <Button type="submit" size="sm" loading={submittingComment}>
+                      Comment
                     </Button>
                   </div>
-                </label>
-              </div>
+                </div>
+              </form>
             </div>
+          )}
+        </div>
 
-            <DropdownSeparator />
-
-            <div>
-              <h3 className="text-sm font-semibold text-foreground-muted uppercase tracking-wide mb-3">Экспорт</h3>
-              <div className="space-y-2">
-                <button className="w-full flex items-center gap-3 px-3 py-2 rounded-sm text-sm text-foreground hover:bg-muted transition-colors">
-                  <Download className="h-4 w-4" />
-                  <span>Экспорт в PDF</span>
-                </button>
-                <button className="w-full flex items-center gap-3 px-3 py-2 rounded-sm text-sm text-foreground hover:bg-muted transition-colors">
-                  <FileText className="h-4 w-4" />
-                  <span>Экспорт в Markdown</span>
-                </button>
-                <button className="w-full flex items-center gap-3 px-3 py-2 rounded-sm text-sm text-foreground hover:bg-muted transition-colors">
-                  <LinkIcon className="h-4 w-4" />
-                  <span>Экспорт в HTML</span>
-                </button>
-              </div>
-            </div>
+        {/* Activity */}
+        <div className="space-y-4 border-t border-border-light pt-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-medium text-foreground-primary flex items-center gap-2">
+              <Clock className="w-5 h-5" />
+              Activity
+            </h3>
+            <button
+              onClick={() => setShowActivity(!showActivity)}
+              className="p-1 rounded hover:bg-background-hover text-foreground-tertiary"
+              aria-label={showActivity ? 'Collapse' : 'Expand'}
+            >
+              <ChevronRight className={cn('w-4 h-4 transition-transform', showActivity && 'rotate-90')} />
+            </button>
           </div>
-        )}
+
+          {showActivity && (
+            <div className="space-y-3 mt-4">
+              {activities.length === 0 ? (
+                <p className="text-sm text-foreground-tertiary text-center py-4">No recent activity</p>
+              ) : (
+                activities.map((activity, index) => (
+                  <ActivityItem key={index} activity={activity} />
+                ))
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </aside>
+  );
+}
+
+function PropertyRow({ label, children }) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-foreground-tertiary">{label}</span>
+      <div className="text-right">{children}</div>
+    </div>
+  );
+}
+
+function CommentItem({ comment, onResolve, onDelete, currentUserId }) {
+  const isOwn = comment.user_id === currentUserId;
+  const resolved = comment.resolved;
+
+  return (
+    <div className={cn('flex gap-3', resolved && 'opacity-60')}>
+      <Avatar size="sm" name={comment.display_name || comment.username} src={comment.avatar_url} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-sm text-foreground-primary">{comment.display_name || comment.username}</span>
+          <span className="text-xs text-foreground-tertiary">{formatRelativeTime(comment.created_at)}</span>
+          {resolved && <Badge variant="success" className="text-xs">Resolved</Badge>}
+          {isOwn && (
+            <Tooltip content="Comment options" position="right">
+              <Dropdown
+                trigger={
+                  <button className="p-1 rounded hover:bg-background-hover text-foreground-tertiary" aria-label="Comment options">
+                    <MoreHorizontal className="w-4 h-4" />
+                  </button>
+                }
+                items={commentMenuItems(comment)}
+                align="right"
+              />
+            </Tooltip>
+          )}
+        </div>
+        <p className="text-sm text-foreground-secondary mt-1">{comment.content}</p>
+      </div>
+    </div>
+  );
+}
+
+function ActivityItem({ activity }) {
+  return (
+    <div className="flex gap-3 text-sm">
+      <div className="w-2 h-2 rounded-full bg-primary mt-2 flex-shrink-0" />
+      <div className="flex-1">
+        <p className="text-foreground-secondary">{activity.action} {activity.entity_type}</p>
+        <p className="text-xs text-foreground-tertiary">{formatRelativeTime(activity.created_at)}</p>
+      </div>
+    </div>
   );
 }
